@@ -15,6 +15,7 @@ notebooks/predictions.pdf
 
 runs/
 data/
+!notebooks/data/
 sweep_results/
 
 # C extensions
