@@ -165,7 +165,7 @@ def produce_plots_2d(
 
     ### ----- GENERATE EVALUATION DATA ----- ###
     print("Generating evaluation data for visualization...")
-    X_seq_2d, Y_seq_2d, _ = dataset.build_modular_addition_sequence_dataset_2d(
+    X_seq_2d, Y_seq_2d, _ = dataset.OnlineModularAdditionDataset2D.generate_dataset(
         config["data"]["p1"],
         config["data"]["p2"],
         template_2d,
@@ -327,7 +327,7 @@ def produce_plots_1d(
 
     ### ----- GENERATE EVALUATION DATA ----- ###
     print("Generating evaluation data for visualization...")
-    X_seq_1d, Y_seq_1d, _ = dataset.build_modular_addition_sequence_dataset_1d(
+    X_seq_1d, Y_seq_1d, _ = dataset.OnlineModularAdditionDataset1D.generate_dataset(
         config["data"]["p"],
         template_1d,
         config["data"]["k"],
@@ -992,7 +992,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
             # Sequence models (QuadraticRNN, SequentialMLP) use sequence datasets
             if group_name == "cn":
                 # Generate training dataset
-                X_train, Y_train, _ = dataset.build_modular_addition_sequence_dataset_1d(
+                X_train, Y_train, _ = dataset.OnlineModularAdditionDataset1D.generate_dataset(
                     config["data"]["p"],
                     template_1d,
                     config["data"]["k"],
@@ -1003,7 +1003,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
 
                 # Generate validation dataset
                 val_samples = max(1000, config["data"]["num_samples"] // 10)
-                X_val, Y_val, _ = dataset.build_modular_addition_sequence_dataset_1d(
+                X_val, Y_val, _ = dataset.OnlineModularAdditionDataset1D.generate_dataset(
                     config["data"]["p"],
                     template_1d,
                     config["data"]["k"],
@@ -1013,7 +1013,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
                 )
             elif group_name == "cnxcn":
                 # Generate training dataset
-                X_train, Y_train, _ = dataset.build_modular_addition_sequence_dataset_2d(
+                X_train, Y_train, _ = dataset.OnlineModularAdditionDataset2D.generate_dataset(
                     config["data"]["p1"],
                     config["data"]["p2"],
                     template_2d,
@@ -1025,7 +1025,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
 
                 # Generate validation dataset
                 val_samples = max(1000, config["data"]["num_samples"] // 10)
-                X_val, Y_val, _ = dataset.build_modular_addition_sequence_dataset_2d(
+                X_val, Y_val, _ = dataset.OnlineModularAdditionDataset2D.generate_dataset(
                     config["data"]["p1"],
                     config["data"]["p2"],
                     template_2d,

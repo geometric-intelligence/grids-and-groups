@@ -8,7 +8,7 @@ import src.dataset as dataset
 
 
 class TestBuildModularAdditionSequenceDataset1D:
-    """Tests for build_modular_addition_sequence_dataset_1d."""
+    """Tests for OnlineModularAdditionDataset1D.generate_dataset."""
 
     @pytest.fixture
     def template_1d(self):
@@ -23,7 +23,7 @@ class TestBuildModularAdditionSequenceDataset1D:
         k = 3
         num_samples = 100
 
-        X, Y, sequence = dataset.build_modular_addition_sequence_dataset_1d(
+        X, Y, sequence = dataset.OnlineModularAdditionDataset1D.generate_dataset(
             p=p, template=template_1d, k=k, mode="sampled", num_samples=num_samples
         )
 
@@ -36,7 +36,7 @@ class TestBuildModularAdditionSequenceDataset1D:
         p = len(template_1d)
         k = 2
 
-        X, Y, sequence = dataset.build_modular_addition_sequence_dataset_1d(
+        X, Y, sequence = dataset.OnlineModularAdditionDataset1D.generate_dataset(
             p=p, template=template_1d, k=k, mode="exhaustive"
         )
 
@@ -51,7 +51,7 @@ class TestBuildModularAdditionSequenceDataset1D:
         k = 4
         num_samples = 50
 
-        X, Y, sequence = dataset.build_modular_addition_sequence_dataset_1d(
+        X, Y, sequence = dataset.OnlineModularAdditionDataset1D.generate_dataset(
             p=p,
             template=template_1d,
             k=k,
@@ -70,7 +70,7 @@ class TestBuildModularAdditionSequenceDataset1D:
         p = len(template_1d)
         k = 2
 
-        X, Y, sequence = dataset.build_modular_addition_sequence_dataset_1d(
+        X, Y, sequence = dataset.OnlineModularAdditionDataset1D.generate_dataset(
             p=p, template=template_1d, k=k, mode="exhaustive"
         )
 
@@ -81,7 +81,7 @@ class TestBuildModularAdditionSequenceDataset1D:
 
 
 class TestBuildModularAdditionSequenceDataset2D:
-    """Tests for build_modular_addition_sequence_dataset_2d."""
+    """Tests for OnlineModularAdditionDataset2D.generate_dataset."""
 
     @pytest.fixture
     def template_2d(self):
@@ -96,7 +96,7 @@ class TestBuildModularAdditionSequenceDataset2D:
         k = 3
         num_samples = 100
 
-        X, Y, sequence_xy = dataset.build_modular_addition_sequence_dataset_2d(
+        X, Y, sequence_xy = dataset.OnlineModularAdditionDataset2D.generate_dataset(
             p1=p1, p2=p2, template=template_2d, k=k, mode="sampled", num_samples=num_samples
         )
 
@@ -115,7 +115,7 @@ class TestBuildModularAdditionSequenceDataset2D:
         template = np.random.randn(p1, p2).astype(np.float32)
         k = 2
 
-        X, Y, sequence_xy = dataset.build_modular_addition_sequence_dataset_2d(
+        X, Y, sequence_xy = dataset.OnlineModularAdditionDataset2D.generate_dataset(
             p1=p1, p2=p2, template=template, k=k, mode="exhaustive"
         )
 
@@ -126,38 +126,45 @@ class TestBuildModularAdditionSequenceDataset2D:
         assert sequence_xy.shape == (expected_n, k, 2)
 
 
-class TestBuildModularAdditionSequenceDatasetD3:
-    """Tests for build_modular_addition_sequence_dataset_D3."""
+class TestBuildModularAdditionSequenceDatasetGenericD3:
+    """Tests for build_modular_addition_sequence_dataset_generic with DihedralGroup."""
 
     @pytest.fixture
-    def template_d3(self):
+    def d3_group(self):
+        """Create a DihedralGroup(N=3) for testing."""
+        from escnn.group import DihedralGroup
+
+        return DihedralGroup(N=3)
+
+    @pytest.fixture
+    def template_d3(self, d3_group):
         """Create a template for D3 group (order 6)."""
-        group_order = 6
+        group_order = d3_group.order()
         template = np.random.randn(group_order).astype(np.float32)
         return template
 
-    def test_output_shape_sampled(self, template_d3):
+    def test_output_shape_sampled(self, template_d3, d3_group):
         """Test output shapes in sampled mode."""
         k = 3
         num_samples = 100
         group_order = len(template_d3)
 
-        X, Y, sequence = dataset.build_modular_addition_sequence_dataset_D3(
-            template=template_d3, k=k, mode="sampled", num_samples=num_samples
+        X, Y, sequence = dataset.build_modular_addition_sequence_dataset_generic(
+            template=template_d3, k=k, group=d3_group, mode="sampled", num_samples=num_samples
         )
 
         assert X.shape == (num_samples, k, group_order), f"X shape mismatch: {X.shape}"
         assert Y.shape == (num_samples, group_order), f"Y shape mismatch: {Y.shape}"
         assert sequence.shape == (num_samples, k), f"sequence shape mismatch: {sequence.shape}"
 
-    def test_output_shape_exhaustive(self, template_d3):
+    def test_output_shape_exhaustive(self, template_d3, d3_group):
         """Test output shapes in exhaustive mode."""
         k = 2
         group_order = len(template_d3)
-        n_elements = group_order  # D3 has 6 elements
+        n_elements = group_order
 
-        X, Y, sequence = dataset.build_modular_addition_sequence_dataset_D3(
-            template=template_d3, k=k, mode="exhaustive"
+        X, Y, sequence = dataset.build_modular_addition_sequence_dataset_generic(
+            template=template_d3, k=k, group=d3_group, mode="exhaustive"
         )
 
         expected_n = n_elements**k
@@ -165,15 +172,16 @@ class TestBuildModularAdditionSequenceDatasetD3:
         assert Y.shape == (expected_n, group_order)
         assert sequence.shape == (expected_n, k)
 
-    def test_output_shape_return_all_outputs(self, template_d3):
+    def test_output_shape_return_all_outputs(self, template_d3, d3_group):
         """Test output shapes with return_all_outputs=True."""
         k = 4
         num_samples = 50
         group_order = len(template_d3)
 
-        X, Y, sequence = dataset.build_modular_addition_sequence_dataset_D3(
+        X, Y, sequence = dataset.build_modular_addition_sequence_dataset_generic(
             template=template_d3,
             k=k,
+            group=d3_group,
             mode="sampled",
             num_samples=num_samples,
             return_all_outputs=True,
