@@ -1105,6 +1105,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
                 eval_dataloader=val_loader,
                 save_param_interval=config["training"]["save_param_interval"],
                 reduction_threshold=reduction_threshold,
+                dense_save_until=config["training"].get("dense_save_until", 0),
             )
         )
 

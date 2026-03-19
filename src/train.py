@@ -17,6 +17,7 @@ def train(
     eval_dataloader: DataLoader | None = None,
     save_param_interval: int | None = None,
     reduction_threshold: float | None = None,
+    dense_save_until: int = 0,
 ) -> tuple[list[float], list[float], list[dict[str, torch.Tensor]], list[int], int]:
     """
     Train a model with sequential inputs (offline/epoch-based).
@@ -35,6 +36,7 @@ def train(
         reduction_threshold: If provided, stop training when loss reduction reaches
                             this threshold (e.g., 0.99 = 99% reduction). If None,
                             train for full epochs.
+        dense_save_until: Save params every epoch for the first N epochs (default 0).
 
     Returns:
         tuple: (train_loss_history, val_loss_history, param_history,
@@ -99,12 +101,12 @@ def train(
 
         val_loss_history.append(val_loss)
 
-        # Only save parameters at intervals or at the end
-        # If save_param_interval is None, only save at the very end
         should_save = (
-            save_param_interval is not None
-            and (epoch % save_param_interval == 0 or epoch == epochs)
-        ) or (save_param_interval is None and epoch == epochs)
+            epoch <= dense_save_until
+            or (save_param_interval is not None
+                and (epoch % save_param_interval == 0 or epoch == epochs))
+            or (save_param_interval is None and epoch == epochs)
+        )
 
         if should_save:
             with torch.no_grad():
