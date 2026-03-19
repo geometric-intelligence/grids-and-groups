@@ -16,12 +16,12 @@ data:
   # custom_fourier powers (one per irrep)
   # D5 irreps: [1, 1, 2, 2]
   # Well-separated powers for clean staircase learning
-  powers: [0.0, 3000.0, 2000.0, 1000.0]
+  powers: [0.0, 9000.0, 5000.0, 1000.0]
 
 model:
   model_type: TwoLayerNet
-  hidden_dim: 300  # hidden_factor=30 * group_size=10
-  init_scale: 0.005
+  hidden_dim: 500  # hidden_factor=30 * group_size=10
+  init_scale: 0.00005
   nonlinearity: square
   output_scale: 1.0
   return_all_outputs: false
@@ -29,10 +29,10 @@ model:
 
 training:
   mode: offline
-  epochs: 5000
+  epochs: 10000
   num_steps: 100
   optimizer: per_neuron
-  learning_rate: 0.001
+  learning_rate: 0.002
   betas: [0.9, 0.999]
   weight_decay: 0.0
   degree: null
