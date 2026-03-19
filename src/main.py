@@ -689,7 +689,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
             for k_mode in range(1, len(powers)):
                 mag = np.sqrt(powers[k_mode] * p / 2.0)
                 fourier_coef_mags.append(mag)
-            print(f"Template type: custom_fourier")
+            print("Template type: custom_fourier")
             print(f"Desired powers (per freq mode): {powers}")
             print(f"Fourier coef magnitudes: {fourier_coef_mags}")
             template_1d = template.fixed_cn(p, fourier_coef_mags)
