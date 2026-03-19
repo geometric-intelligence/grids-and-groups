@@ -780,6 +780,8 @@ def plot_power_group(
     init_scale: float,
     save_path: str = None,
     group_label: str = "Group",
+    learning_rate: float = None,
+    hidden_dim: int = None,
 ):
     """Plot power spectrum of model outputs vs template over training.
 
@@ -821,11 +823,17 @@ def plot_power_group(
     top_k = min(5, n_irreps)
     top_irrep_indices = np.argsort(template_power)[::-1][:top_k]
 
-    colors_line = plt.cm.tab10(np.linspace(0, 1, top_k))
+    _group_power_colors = ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+    colors_line = _group_power_colors[:top_k]
 
     valid_mask = np.array(epoch_numbers) > 0
     valid_epochs = np.array(epoch_numbers)[valid_mask]
     valid_model_powers = model_powers[valid_mask, :]
+
+    def _irrep_label(idx, irreps):
+        dim = irreps[idx].size
+        dim_str = f"{dim}D"
+        return rf"$\rho_{{{idx}}}$ ({dim_str})"
 
     # Plot 1: Linear scales
     ax = axes[0]
@@ -837,7 +845,7 @@ def plot_power_group(
             "-",
             lw=2,
             color=colors_line[i],
-            label=f"Irrep {irrep_idx} (dim={irreps[irrep_idx].size})",
+            label=_irrep_label(irrep_idx, irreps),
         )
         ax.axhline(template_power[irrep_idx], linestyle="--", alpha=0.5, color=colors_line[i])
     ax.set_xlabel("Epoch")
@@ -856,7 +864,7 @@ def plot_power_group(
             "-",
             lw=2,
             color=colors_line[i],
-            label=f"Irrep {irrep_idx} (dim={irreps[irrep_idx].size})",
+            label=_irrep_label(irrep_idx, irreps),
         )
         ax.axhline(template_power[irrep_idx], linestyle="--", alpha=0.5, color=colors_line[i])
     ax.set_xscale("log")
@@ -878,7 +886,7 @@ def plot_power_group(
                 "-",
                 lw=2,
                 color=colors_line[i],
-                label=f"Irrep {irrep_idx} (dim={irreps[irrep_idx].size})",
+                label=_irrep_label(irrep_idx, irreps),
             )
         if template_power[irrep_idx] > 0:
             ax.axhline(template_power[irrep_idx], linestyle="--", alpha=0.5, color=colors_line[i])
@@ -890,11 +898,13 @@ def plot_power_group(
     ax.legend(loc="upper left", fontsize=7)
     ax.grid(True, alpha=0.3)
 
-    fig.suptitle(
-        f"{group_label} Power Evolution Over Training (k={k}, {optimizer}, init={init_scale:.0e})",
-        fontsize=14,
-        fontweight="bold",
-    )
+    title_parts = [f"{group_label} Power Evolution Over Training (k={k}, {optimizer}, init={init_scale:.0e}"]
+    if learning_rate is not None:
+        title_parts.append(f", lr={learning_rate}")
+    if hidden_dim is not None:
+        title_parts.append(f", h={hidden_dim}")
+    title_parts.append(")")
+    fig.suptitle("".join(title_parts), fontsize=14, fontweight="bold")
 
     plt.tight_layout()
 

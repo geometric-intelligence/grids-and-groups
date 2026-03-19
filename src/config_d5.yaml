@@ -1,0 +1,48 @@
+# ============================================================================
+# Configuration: Dihedral Group D5
+# ============================================================================
+# D5 has 4 irreps with dimensions [1, 1, 2, 2]
+
+data:
+  group_name: dihedral
+  group_n: 5
+  k: 2
+  batch_size: 128
+  seed: 10
+  template_type: custom_fourier
+  mode: exhaustive
+  num_samples: 1000
+
+  # custom_fourier powers (one per irrep)
+  # D5 irreps: [1, 1, 2, 2]
+  # Well-separated powers for clean staircase learning
+  powers: [0.0, 3000.0, 2000.0, 1000.0]
+
+model:
+  model_type: TwoLayerNet
+  hidden_dim: 300  # hidden_factor=30 * group_size=10
+  init_scale: 0.005
+  nonlinearity: square
+  output_scale: 1.0
+  return_all_outputs: false
+  transform_type: quadratic
+
+training:
+  mode: offline
+  epochs: 5000
+  num_steps: 100
+  optimizer: per_neuron
+  learning_rate: 0.001
+  betas: [0.9, 0.999]
+  weight_decay: 0.0
+  degree: null
+  scaling_factor: -3
+  grad_clip: 0.1
+  verbose_interval: 400
+  save_param_interval: 1
+  reduction_threshold: null
+
+device: cuda:0
+
+analysis:
+  checkpoints: [0.0, 1.0]

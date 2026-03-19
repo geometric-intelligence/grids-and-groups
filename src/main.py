@@ -536,8 +536,16 @@ def produce_plots_group(
         ax.set_ylabel("Training Loss")
         ax.set_title(title)
         ax.grid(True, alpha=0.3)
+        if yscale == "log":
+            ax.set_ylim(bottom=1.0)
 
-    plt.suptitle(f"{group_label} Composition (k={k})", fontsize=14)
+    lr = config["training"]["learning_rate"]
+    hidden_dim = config["model"]["hidden_dim"]
+    init_scale = config["model"]["init_scale"]
+    plt.suptitle(
+        f"{group_label} Composition (k={k}, lr={lr}, h={hidden_dim}, init={init_scale:.0e})",
+        fontsize=14,
+    )
     plt.tight_layout()
     training_loss_path = os.path.join(run_dir, "training_loss.pdf")
     plt.savefig(training_loss_path, bbox_inches="tight", dpi=150)
@@ -574,6 +582,8 @@ def produce_plots_group(
         init_scale=init_scale,
         save_path=os.path.join(run_dir, "power_spectrum_analysis.pdf"),
         group_label=group_label,
+        learning_rate=config["training"]["learning_rate"],
+        hidden_dim=config["model"]["hidden_dim"],
     )
     print(f"  ✓ Saved {os.path.join(run_dir, 'power_spectrum_analysis.pdf')}")
 

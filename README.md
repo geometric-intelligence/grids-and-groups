@@ -63,20 +63,21 @@ poetry install
 Train a model on a specific group:
 
 ```bash
-python src/main.py --config src/config_d3.yaml
+python src/main.py --config src/config_d5.yaml
 ```
 
 Results (loss curves, predictions, power spectra) are saved to a timestamped directory under `runs/`.
 
 ### Supported Groups
 
-The repository includes preconfigured experiments for five groups:
+The repository includes preconfigured experiments for six groups:
 
 | Group | Config | Order | Architecture |
 |:------|:-------|:-----:|:-------------|
 | Cyclic $C_{10}$ | `src/config_c10.yaml` | 10 | SequentialMLP |
 | Product $C_4 \times C_4$ | `src/config_c4x4.yaml` | 16 | SequentialMLP |
 | Dihedral $D_3$ | `src/config_d3.yaml` | 6 | TwoLayerNet |
+| Dihedral $D_5$ | `src/config_d5.yaml` | 10 | TwoLayerNet |
 | Octahedral $O_h$ | `src/config_octahedral.yaml` | 24 | TwoLayerNet |
 | Icosahedral $A_5$ | `src/config_a5.yaml` | 60 | TwoLayerNet |
 
@@ -118,26 +119,26 @@ Key parameters in the YAML config files:
 | `training.epochs` | integer | Number of epochs (offline mode) |
 
 <details>
-<summary><b>Example config -- D3 with custom Fourier template</b></summary>
+<summary><b>Example config -- D5 with custom Fourier template</b></summary>
 
 ```yaml
 data:
   group_name: dihedral
-  group_n: 3
+  group_n: 5
   k: 2
   template_type: custom_fourier
-  powers: [0.0, 30.0, 3000.0]
+  powers: [0.0, 3000.0, 2000.0, 1000.0]
 
 model:
   model_type: TwoLayerNet
-  hidden_dim: 180
-  init_scale: 0.001
+  hidden_dim: 300
+  init_scale: 0.0001
 
 training:
   optimizer: per_neuron
-  learning_rate: 0.01
+  learning_rate: 0.006
   mode: offline
-  epochs: 2000
+  epochs: 5000
 ```
 
 </details>
