@@ -103,8 +103,10 @@ def train(
 
         should_save = (
             epoch <= dense_save_until
-            or (save_param_interval is not None
-                and (epoch % save_param_interval == 0 or epoch == epochs))
+            or (
+                save_param_interval is not None
+                and (epoch % save_param_interval == 0 or epoch == epochs)
+            )
             or (save_param_interval is None and epoch == epochs)
         )
 

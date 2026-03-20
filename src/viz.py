@@ -578,9 +578,7 @@ def plot_power_cn(
 
     print(f"  Template power spectrum (cn): {template_power}")
 
-    model_powers, steps = power.model_power_over_time(
-        "cn", model, param_hist, X_eval
-    )
+    model_powers, steps = power.model_power_over_time("cn", model, param_hist, X_eval)
     epoch_numbers = [param_save_indices[min(s, len(param_save_indices) - 1)] for s in steps]
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
@@ -602,8 +600,14 @@ def plot_power_cn(
     ax = axes[0]
     for i, mode_idx in enumerate(top_mode_indices):
         power_values = model_powers[:, mode_idx]
-        ax.plot(epoch_numbers, power_values, "-", lw=2, color=colors_line[i],
-                label=_mode_label(mode_idx))
+        ax.plot(
+            epoch_numbers,
+            power_values,
+            "-",
+            lw=2,
+            color=colors_line[i],
+            label=_mode_label(mode_idx),
+        )
         ax.axhline(template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i])
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Power")
@@ -615,8 +619,9 @@ def plot_power_cn(
     ax = axes[1]
     for i, mode_idx in enumerate(top_mode_indices):
         power_values = valid_model_powers[:, mode_idx]
-        ax.plot(valid_epochs, power_values, "-", lw=2, color=colors_line[i],
-                label=_mode_label(mode_idx))
+        ax.plot(
+            valid_epochs, power_values, "-", lw=2, color=colors_line[i], label=_mode_label(mode_idx)
+        )
         ax.axhline(template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i])
     ax.set_xscale("log")
     ax.set_xlabel("Epoch (log scale)")
@@ -631,10 +636,18 @@ def plot_power_cn(
         power_values = valid_model_powers[:, mode_idx]
         power_mask = power_values > 0
         if np.any(power_mask):
-            ax.plot(valid_epochs[power_mask], power_values[power_mask], "-", lw=2,
-                    color=colors_line[i], label=_mode_label(mode_idx))
+            ax.plot(
+                valid_epochs[power_mask],
+                power_values[power_mask],
+                "-",
+                lw=2,
+                color=colors_line[i],
+                label=_mode_label(mode_idx),
+            )
         if template_power[mode_idx] > 0:
-            ax.axhline(template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i])
+            ax.axhline(
+                template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i]
+            )
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("Epoch (log scale)")
@@ -643,7 +656,9 @@ def plot_power_cn(
     ax.legend(loc="upper left", fontsize=7)
     ax.grid(True, alpha=0.3)
 
-    title_parts = [f"{group_label} Power Evolution Over Training (k={k}, {optimizer}, init={init_scale:.0e}"]
+    title_parts = [
+        f"{group_label} Power Evolution Over Training (k={k}, {optimizer}, init={init_scale:.0e}"
+    ]
     if learning_rate is not None:
         title_parts.append(f", lr={learning_rate}")
     if hidden_dim is not None:
@@ -1007,7 +1022,9 @@ def plot_power_group(
     ax.legend(loc="upper left", fontsize=7)
     ax.grid(True, alpha=0.3)
 
-    title_parts = [f"{group_label} Power Evolution Over Training (k={k}, {optimizer}, init={init_scale:.0e}"]
+    title_parts = [
+        f"{group_label} Power Evolution Over Training (k={k}, {optimizer}, init={init_scale:.0e}"
+    ]
     if learning_rate is not None:
         title_parts.append(f", lr={learning_rate}")
     if hidden_dim is not None:
