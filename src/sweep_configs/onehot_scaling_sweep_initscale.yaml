@@ -1,0 +1,39 @@
+# One-hot template scaling sweep with k-dependent init_scale
+# init_scale_k = base_init_scale^(3/(k+1))
+# base_init_scale = 1e-2 → k=2: 0.01, k=3: 0.0316, k=4: 0.0631, k=5: 0.1
+
+base_config: "src/configs/config.yaml"
+n_seeds: 1
+scale_init_with_k: true
+
+# Fixed parameters applied to all experiments
+global_overrides:
+  data:
+    dimension: 1
+    template_type: 'onehot'
+    group_name: cn
+
+  model:
+    init_scale: 1.0e-2  # base init_scale (adjusted per k via scale_init_with_k)
+
+  training:
+    mode: online
+    learning_rate: 1.0e-3
+    reduction_threshold: 0.999
+    num_steps: 1000000
+    optimizer: adam
+    quiet: true
+
+  analysis:
+    plots:
+      template: true
+      training_loss: true
+      predictions: false
+      power_spectrum: false
+
+parameter_grid:
+  data:
+    k: [2, 3, 4, 5]
+    p: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+  model:
+    hidden_dim: [18, 36, 54, 72, 90, 108, 126, 144, 162, 180, 198, 216, 234, 252, 270, 288, 306, 324, 342, 360, 378]

@@ -191,6 +191,15 @@ def generate_experiment_configs(sweep_config: dict) -> list[tuple[str, dict]]:
     else:
         raise ValueError("Sweep config must contain either 'experiments' or 'parameter_grid'")
 
+    # Optionally rescale init_scale based on k: init_scale_k = base^(3/(k+1))
+    if sweep_config.get("scale_init_with_k", False):
+        for _, cfg in experiment_configs:
+            k = cfg["data"]["k"]
+            base_scale = cfg["model"]["init_scale"]
+            adjusted = base_scale ** (3.0 / (k + 1))
+            cfg["model"]["init_scale"] = adjusted
+        print(f"Adjusted init_scale per k: init_scale_k = base^(3/(k+1))")
+
     # Validate: Check for duplicate experiment names
     exp_names = [name for name, _ in experiment_configs]
     if len(exp_names) != len(set(exp_names)):
@@ -558,7 +567,7 @@ def run_parameter_sweep(
     # Create sweep directory
     sweep_name = os.path.splitext(os.path.basename(sweep_file))[0]
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    sweep_dir = Path("sweep_results") / f"{sweep_name}_{timestamp}"
+    sweep_dir = Path("sweep_results").resolve() / f"{sweep_name}_{timestamp}"
     sweep_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\nSweep directory: {sweep_dir}")
