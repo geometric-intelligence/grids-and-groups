@@ -365,7 +365,7 @@ def produce_plots_1d(
     if plot_training_loss:
         print("\nPlotting training loss...")
 
-            fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        _, axes = plt.subplots(2, 2, figsize=(12, 10))
         x_values = steps if training_mode == "online" else epochs
 
         scale_configs = [
@@ -404,7 +404,7 @@ def produce_plots_1d(
     ### ----- PLOT MODEL PREDICTIONS ----- ###
     if not use_group_style:
         if plot_predictions:
-        print("Plotting model predictions over time...")
+            print("Plotting model predictions over time...")
             viz.plot_predictions_1d(
                 model,
                 param_hist,
@@ -581,7 +581,7 @@ def produce_plots_group(
     if plot_training_loss:
         print("\nPlotting training loss...")
 
-        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        _, axes = plt.subplots(2, 2, figsize=(12, 10))
 
         scale_configs = [
             ("linear", "linear", "Linear Scale"),
@@ -604,15 +604,15 @@ def produce_plots_group(
     lr = config["training"]["learning_rate"]
     hidden_dim = config["model"]["hidden_dim"]
     init_scale = config["model"]["init_scale"]
-        plt.suptitle(
-        f"{group_label} Composition (k={k}, lr={lr}, h={hidden_dim}, init={init_scale:.0e})",
-        fontsize=14,
-    )
-        plt.tight_layout()
-        training_loss_path = os.path.join(run_dir, "training_loss.pdf")
-        plt.savefig(training_loss_path, bbox_inches="tight", dpi=150)
-        plt.close()
-        print(f"  ✓ Saved {training_loss_path}")
+    plt.suptitle(
+    f"{group_label} Composition (k={k}, lr={lr}, h={hidden_dim}, init={init_scale:.0e})",
+    fontsize=14,
+)
+    plt.tight_layout()
+    training_loss_path = os.path.join(run_dir, "training_loss.pdf")
+    plt.savefig(training_loss_path, bbox_inches="tight", dpi=150)
+    plt.close()
+    print(f"  ✓ Saved {training_loss_path}")
 
     ### ----- PLOT MODEL PREDICTIONS OVER TIME ----- ###
     if plot_predictions:
