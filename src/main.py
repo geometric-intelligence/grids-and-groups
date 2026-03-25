@@ -131,6 +131,7 @@ def produce_plots_cnxcn(
     plots = config.get("analysis", {}).get("plots", {})
     plot_training_loss = plots.get("training_loss", True)
     plot_predictions = plots.get("predictions", True)
+    plot_power_spectrum = plots.get("power_spectrum", True)
     plot_wmix = plots.get("wmix", True)
 
     ### ----- COMPUTE X-AXIS VALUES ----- ###
@@ -255,6 +256,30 @@ def produce_plots_cnxcn(
             steps=checkpoint_indices,
             save_path=os.path.join(run_dir, "predictions_over_time.pdf"),
             show=False,
+        )
+
+    ### ----- PLOT POWER SPECTRUM ANALYSIS ----- ###
+    if plot_power_spectrum:
+        print("Plotting power spectrum over time...")
+        p1 = config["data"]["p1"]
+        p2 = config["data"]["p2"]
+        optimizer_name = config["training"]["optimizer"]
+        init_scale = config["model"]["init_scale"]
+        viz.plot_power_cnxcn(
+            model=model,
+            param_hist=param_hist,
+            param_save_indices=param_save_indices,
+            X_eval=X_eval_2d_t,
+            template_2d=template_2d,
+            p1=p1,
+            p2=p2,
+            k=k,
+            optimizer=optimizer_name,
+            init_scale=init_scale,
+            save_path=os.path.join(run_dir, "power_spectrum_analysis.pdf"),
+            group_label=f"C{p1}\u00d7C{p2}",
+            learning_rate=config["training"]["learning_rate"],
+            hidden_dim=config["model"]["hidden_dim"],
         )
 
     ### ----- PLOT W_MIX FREQUENCY STRUCTURE (QuadraticRNN only) ----- ###
