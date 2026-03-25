@@ -70,16 +70,18 @@ Results (loss curves, predictions, power spectra) are saved to a timestamped dir
 
 ### Supported Groups
 
-The repository includes preconfigured experiments for six groups:
+The repository includes preconfigured experiments for eight groups:
 
-| Group | Config | Order | Architecture |
-|:------|:-------|:-----:|:-------------|
-| Cyclic $C_{10}$ | `src/configs/config_c10_k3.yaml` | 10 | SequentialMLP |
-| Product $C_4 \times C_4$ | `src/configs/config_c4x4_k3.yaml` | 16 | SequentialMLP |
-| Dihedral $D_3$ | `src/configs/config_d3.yaml` | 6 | TwoLayerNet |
-| Dihedral $D_5$ | `src/configs/config_d5.yaml` | 10 | TwoLayerNet |
-| Octahedral $O_h$ | `src/configs/config_oh.yaml` | 24 | TwoLayerNet |
-| Icosahedral $A_5$ | `src/configs/config_a5.yaml` | 60 | TwoLayerNet |
+| Group | Config | Order | k | Architecture |
+|:------|:-------|:-----:|:-:|:-------------|
+| Cyclic $C_{10}$ | `config_c10_k3.yaml` | 10 | 3 | SequentialMLP |
+| Cyclic $C_{11}$ | `config_c11.yaml` | 11 | 2 | TwoLayerNet |
+| Product $C_4 \times C_4$ | `config_c4x4_k3.yaml` | 16 | 3 | SequentialMLP |
+| Product $C_5 \times C_5$ | `config_c5xc5.yaml` | 25 | 2 | TwoLayerNet |
+| Dihedral $D_3$ | `config_d3.yaml` | 6 | 2 | TwoLayerNet |
+| Dihedral $D_5$ | `config_d5.yaml` | 10 | 2 | TwoLayerNet |
+| Octahedral $O_h$ | `config_oh.yaml` | 24 | 2 | TwoLayerNet |
+| Icosahedral $A_5$ | `config_a5.yaml` | 60 | 2 | TwoLayerNet |
 
 ### Parameter Sweeps
 
@@ -109,7 +111,7 @@ Key parameters in the YAML config files:
 |:----------|:--------|:------------|
 | `data.group_name` | `cn`, `cnxcn`, `dihedral`, `octahedral`, `A5` | Group to learn |
 | `data.k` | integer | Number of elements to compose |
-| `data.template_type` | `mnist`, `fourier`, `gaussian`, `onehot`, `custom_fourier` | Template generation method |
+| `data.template_type` | `custom_fourier`, `onehot`, `mnist`, `gaussian` | Template generation method |
 | `model.model_type` | `QuadraticRNN`, `SequentialMLP`, `TwoLayerNet` | Architecture |
 | `model.hidden_dim` | integer | Hidden layer size |
 | `model.init_scale` | float | Weight initialization scale |
