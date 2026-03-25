@@ -3,9 +3,6 @@
 # ============================================================================
 # C5 x C5 has order 25. Uses 2D template with p1=5, p2=5.
 #
-# NOTE: custom_fourier is not yet supported for cnxcn groups.
-# Using 'fourier' template with n_freqs to control frequency content.
-
 data:
   group_name: cnxcn           # Group family: 'cn' | 'cnxcn' | 'dihedral' | 'octahedral' | 'A5'
   p1: 5                       # First cyclic group order / template height (cnxcn only)
@@ -13,8 +10,9 @@ data:
   k: 2                        # Sequence length (number of group elements to compose)
   batch_size: 128             # Training batch size
   seed: 10                    # Random seed for reproducibility
-  template_type: fourier      # Template type: 'mnist' | 'fourier' (custom_fourier not supported for cnxcn)
-  n_freqs: 3                  # Number of Fourier modes (fourier template only)
+  template_type: custom_fourier  # Template type: 'mnist' | 'custom_fourier'
+  # Desired power per 2D Fourier mode (modes: (1,0), (0,1), (1,1))
+  powers: [200.0, 100.0, 50.0]
   mode: exhaustive            # Dataset mode: 'sampled' | 'exhaustive'
   num_samples: 1000           # Number of samples (used when mode='sampled')
 

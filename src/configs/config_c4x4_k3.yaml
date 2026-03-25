@@ -10,8 +10,8 @@ data:
   k: 3                        # Sequence length (number of group elements to compose)
   batch_size: 128             # Training batch size
   seed: 10                    # Random seed for reproducibility
-  template_type: fourier      # Template type: 'mnist' | 'fourier' | 'gaussian' | 'onehot'
-  n_freqs: 1                  # Number of Fourier modes (fourier template only)
+  template_type: custom_fourier  # Template type: 'mnist' | 'custom_fourier'
+  powers: [100.0]             # Desired power per 2D Fourier mode (modes: (1,0))
   mode: exhaustive            # Dataset mode: 'sampled' | 'exhaustive'
   num_samples: 1000           # Number of samples (used when mode='sampled')
 

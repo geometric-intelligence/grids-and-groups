@@ -93,7 +93,7 @@ def save_results(
     return metadata
 
 
-def produce_plots_2d(
+def produce_plots_cnxcn(
     run_dir: Path,
     config: dict,
     model,
@@ -268,7 +268,7 @@ def produce_plots_2d(
     print("\n✓ All plots generated successfully!")
 
 
-def produce_plots_1d(
+def produce_plots_cn(
     run_dir: Path,
     config: dict,
     model,
@@ -715,28 +715,15 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
 
         if template_type == "mnist":
             template_1d = template.mnist_1d(p, config["data"]["mnist_label"], root="data")
-        # TODO: remove fourier in favor of custom_fourier for cn, which uses fixed_cn function.
-        elif template_type == "fourier":
-            n_freqs = config["data"]["n_freqs"]
-            template_1d = template.fourier_1d(p, n_freqs=n_freqs, seed=config["data"]["seed"])
         elif template_type == "gaussian":
             template_1d = template.gaussian_1d(p, n_gaussians=3, seed=config["data"]["seed"])
         elif template_type == "onehot":
             template_1d = template.onehot_1d(p)
         elif template_type == "custom_fourier":
             powers = config["data"]["powers"]
-            n_modes = (p + 1) // 2 if p % 2 == 1 else p // 2 + 1
-            assert len(powers) == n_modes, (
-                f"powers length {len(powers)} must equal number of frequency modes {n_modes} for p={p}"
-            )
-            fourier_coef_mags = [0.0]  # DC component
-            for k_mode in range(1, len(powers)):
-                mag = np.sqrt(powers[k_mode] * p / 2.0)
-                fourier_coef_mags.append(mag)
             print("Template type: custom_fourier")
             print(f"Desired powers (per freq mode): {powers}")
-            print(f"Fourier coef magnitudes: {fourier_coef_mags}")
-            template_1d = template.fixed_cn(p, fourier_coef_mags)
+            template_1d = template.fixed_cn(p, powers)
         else:
             raise ValueError(f"Unknown template_type: {template_type}")
 
@@ -764,12 +751,15 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
 
         if template_type == "mnist":
             template_2d = template.mnist_2d(p1, p2, config["data"]["mnist_label"], root="data")
-        elif template_type == "fourier":
-            # TODO: remove fourier in favor of custom_fourier for cnxcn, using fixed_cnxcn function.
-            n_freqs = config["data"]["n_freqs"]
-            template_2d = template.unique_freqs_2d(
-                p1, p2, n_freqs=n_freqs, seed=config["data"]["seed"]
+        elif template_type == "custom_fourier":
+            assert p1 == p2, (
+                f"custom_fourier for cnxcn requires p1 == p2, got p1={p1}, p2={p2}"
             )
+            powers = config["data"]["powers"]
+            print("Template type: custom_fourier")
+            print(f"Desired powers (per 2D mode): {powers}")
+            tpl_flat = template.fixed_cnxcn(p1, p2, powers)
+            template_2d = tpl_flat.reshape(p1, p2)
         else:
             raise ValueError(f"Unknown template_type for cnxcn: {template_type}")
 
@@ -1218,7 +1208,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
     ### ----- PRODUCE ALL PLOTS ----- ###
     if group_name == "cnxcn":
         # Produce detailed plots for 2D
-        produce_plots_2d(
+        produce_plots_cnxcn(
             run_dir=run_dir,
             config=config,
             model=rnn_2d,
@@ -1231,7 +1221,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
         )
     elif group_name == "cn":
         # Produce detailed plots for 1D
-        produce_plots_1d(
+        produce_plots_cn(
             run_dir=run_dir,
             config=config,
             model=rnn_2d,

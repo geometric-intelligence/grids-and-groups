@@ -6,8 +6,8 @@ data:
   k: 2
   batch_size: 2
   seed: 42
-  template_type: fourier
-  n_freqs: 1
+  template_type: custom_fourier
+  powers: [100.0]
   mode: sampled
   num_samples: 5
 

@@ -39,11 +39,11 @@ data:
   seed: 5
 
   # Template Generation
-  # For group_name='cn','cnxcn': 'mnist' | 'fourier' | 'gaussian' | 'onehot'
+  # For group_name='cn': 'mnist' | 'gaussian' | 'onehot' | 'custom_fourier'
+  # For group_name='cnxcn': 'mnist' | 'custom_fourier'
   # For group_name='dihedral','octahedral','A5': 'onehot' | 'custom_fourier'
   template_type: onehot
   mnist_label: 4            # MNIST digit (0-9), only if template_type='mnist'
-  n_freqs: 1               # Number of Fourier modes, only if template_type='fourier'
 
   # custom_fourier template: powers for each irrep's Fourier coefficient
   # Example for D3: 3 irreps with dimensions [1, 1, 2], so powers should have 3 values
