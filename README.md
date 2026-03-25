@@ -187,8 +187,8 @@ group-agf/
 
 ### `dataset.py` -- Data Generation
 
-- **Online datasets**: `OnlineModularAdditionDataset1D`, `OnlineModularAdditionDataset2D` -- generate samples on-the-fly (GPU-accelerated)
-- **Offline builders**: `build_modular_addition_sequence_dataset_1d`, `_2d`, `_D3`, `_generic`
+- **Online datasets**: `OnlineModularAdditionDataset1D`, `OnlineModularAdditionDataset2D` -- generate samples on-the-fly (GPU-accelerated), also provide `generate_dataset()` for fixed/offline datasets
+- **Generic builder**: `build_modular_addition_sequence_dataset_generic` -- works with any escnn group via its regular representation
 - **Group datasets**: `cn_dataset`, `cnxcn_dataset`, `group_dataset` -- full group multiplication tables for TwoLayerNet
 
 ### `template.py` -- Template Construction

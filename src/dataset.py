@@ -119,6 +119,73 @@ class OnlineModularAdditionDataset2D(IterableDataset):
 
             yield X, Y
 
+    @staticmethod
+    def generate_dataset(
+        p1: int,
+        p2: int,
+        template: np.ndarray,
+        k: int,
+        mode: str = "sampled",
+        num_samples: int = 65536,
+        return_all_outputs: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Generate a fixed 2D modular addition dataset.
+
+        Args:
+            p1: height (rows) dimension
+            p2: width  (cols) dimension
+            template: (p1, p2) template array
+            k: sequence length
+            mode: "sampled" or "exhaustive"
+            num_samples: number of samples for "sampled" mode
+            return_all_outputs: if True, return intermediate outputs
+
+        Returns:
+            X:           (N, k, p1*p2) input sequences (flattened rolled templates)
+            Y:           (N, p1*p2) or (N, k, p1*p2) targets
+            sequence_xy: (N, k, 2) integer group elements (ax_t, ay_t) per token
+        """
+        assert template.shape == (p1, p2), f"template must be ({p1}, {p2}), got {template.shape}"
+        p_flat = p1 * p2
+
+        if mode == "exhaustive":
+            total = (p1 * p2) ** k
+            if total > 1_000_000:
+                raise ValueError(f"(p1*p2)**k = {total} is huge; use mode='sampled' instead.")
+            N = total
+            sequence_xy = np.zeros((N, k, 2), dtype=np.int64)
+            for idx in range(N):
+                for t in range(k):
+                    flat_idx = (idx // (p_flat**t)) % p_flat
+                    ax = flat_idx // p2
+                    ay = flat_idx % p2
+                    sequence_xy[idx, t, 0] = ax
+                    sequence_xy[idx, t, 1] = ay
+        else:
+            N = int(num_samples)
+            sequence_xy = np.empty((N, k, 2), dtype=np.int64)
+            sequence_xy[:, :, 0] = np.random.randint(0, p1, size=(N, k))
+            sequence_xy[:, :, 1] = np.random.randint(0, p2, size=(N, k))
+
+        X = np.zeros((N, k, p_flat), dtype=np.float32)
+        Y = np.zeros((N, k, p_flat), dtype=np.float32)
+
+        for i in range(N):
+            sx, sy = 0, 0
+            for t in range(k):
+                ax, ay = int(sequence_xy[i, t, 0]), int(sequence_xy[i, t, 1])
+                rolled = np.roll(np.roll(template, shift=ax, axis=0), shift=ay, axis=1)
+                X[i, t, :] = rolled.ravel()
+                sx = (sx + ax) % p1
+                sy = (sy + ay) % p2
+                Y[i, t, :] = np.roll(np.roll(template, shift=sx, axis=0), shift=sy, axis=1).ravel()
+
+        if not return_all_outputs:
+            Y = Y[:, -1, :]
+
+        return X, Y, sequence_xy
+
 
 class OnlineModularAdditionDataset1D(IterableDataset):
     """
@@ -203,232 +270,63 @@ class OnlineModularAdditionDataset1D(IterableDataset):
 
             yield X, Y
 
+    @staticmethod
+    def generate_dataset(
+        p: int,
+        template: np.ndarray,
+        k: int,
+        mode: str = "sampled",
+        num_samples: int = 65536,
+        return_all_outputs: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Generate a fixed 1D modular addition dataset for cyclic group C_p.
 
-def build_modular_addition_sequence_dataset_1d(
-    p: int,
-    template: np.ndarray,
-    k: int,
-    mode: str = "sampled",
-    num_samples: int = 65536,
-    return_all_outputs: bool = False,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Build 1D modular addition dataset for cyclic group C_p.
+        Args:
+            p: dimension of cyclic group
+            template: (p,) template array
+            k: sequence length
+            mode: "sampled" or "exhaustive"
+            num_samples: number of samples for "sampled" mode
+            return_all_outputs: if True, return intermediate outputs
 
-    Args:
-        p: dimension of cyclic group
-        template: (p,) template array
-        k: sequence length
-        mode: "sampled" or "exhaustive"
-        num_samples: number of samples for "sampled" mode
-        return_all_outputs: if True, return intermediate outputs
+        Returns:
+            X: (N, k, p) where token t is template rolled by shift_t
+            Y: (N, p) or (N, k-1, p) target rolled by cumulative sum
+            sequence: (N, k) integer group elements (shifts) per token
+        """
+        assert template.shape == (p,), f"template must be ({p},), got {template.shape}"
 
-    Returns:
-        X: (N, k, p) where token t is template rolled by shift_t
-        Y: (N, p) or (N, k-1, p) target rolled by cumulative sum
-        sequence: (N, k) integer group elements (shifts) per token
-    """
-    assert template.shape == (p,), f"template must be ({p},), got {template.shape}"
+        if mode == "exhaustive":
+            total = p**k
+            if total > 1_000_000:
+                raise ValueError(f"p^k = {total} is huge; use mode='sampled' instead.")
+            N = total
+            sequence = np.zeros((N, k), dtype=np.int64)
+            for idx in range(N):
+                for t in range(k):
+                    sequence[idx, t] = (idx // (p**t)) % p
+        else:
+            N = int(num_samples)
+            sequence = np.random.randint(0, p, size=(N, k), dtype=np.int64)
 
-    if mode == "exhaustive":
-        total = p**k
-        if total > 1_000_000:
-            raise ValueError(f"p^k = {total} is huge; use mode='sampled' instead.")
-        N = total
-        sequence = np.zeros((N, k), dtype=np.int64)
-        for idx in range(N):
+        X = np.zeros((N, k, p), dtype=np.float32)
+        Y = np.zeros((N, k, p), dtype=np.float32)
+
+        for i in range(N):
+            cumsum = 0
             for t in range(k):
-                sequence[idx, t] = (idx // (p**t)) % p
-    else:
-        N = int(num_samples)
-        sequence = np.random.randint(0, p, size=(N, k), dtype=np.int64)
+                shift = int(sequence[i, t])
+                X[i, t, :] = np.roll(template, shift)
+                cumsum = (cumsum + shift) % p
+                Y[i, t, :] = np.roll(template, cumsum)
 
-    X = np.zeros((N, k, p), dtype=np.float32)
-    Y = np.zeros((N, k, p), dtype=np.float32)
+        if not return_all_outputs:
+            Y = Y[:, -1, :]
+        else:
+            Y = Y[:, 1:, :]
 
-    for i in range(N):
-        cumsum = 0
-        for t in range(k):
-            shift = int(sequence[i, t])
-            X[i, t, :] = np.roll(template, shift)
-            cumsum = (cumsum + shift) % p
-            Y[i, t, :] = np.roll(template, cumsum)
-
-    if not return_all_outputs:
-        Y = Y[:, -1, :]
-    else:
-        Y = Y[:, 1:, :]  # Remove first timestep for consistency with 2D
-
-    return X, Y, sequence
-
-
-def build_modular_addition_sequence_dataset_2d(
-    p1: int,
-    p2: int,
-    template: np.ndarray,
-    k: int,
-    mode: str = "sampled",
-    num_samples: int = 65536,
-    return_all_outputs: bool = False,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Build 2D modular addition dataset.
-
-    Args:
-        p1: height (rows) dimension
-        p2: width  (cols) dimension
-        template: (p1, p2) template array
-        k: sequence length
-        mode: "sampled" or "exhaustive"
-        num_samples: number of samples for "sampled" mode
-
-    Returns:
-        X:           (N, k, p1*p2) where token t is template rolled by (ax_t, ay_t), then flattened
-        Y:           (N, k, p1*p2) target at each step, rolled by (sum_t ax_t mod p1, sum_t ay_t mod p2), flattened
-        sequence_xy: (N, k, 2) integer group elements (ax_t, ay_t) per token (NOT cumulative)
-
-    Notes:
-        - axis 0 (rows) is shifted by ax; axis 1 (cols) by ay.
-        - To get cumulative positions after each token, use `sequence_to_paths_xy(sequence_xy, p1, p2)`.
-    """
-    assert template.shape == (p1, p2), f"template must be ({p1}, {p2}), got {template.shape}"
-    p_flat = p1 * p2
-
-    if mode == "exhaustive":
-        total = (p1 * p2) ** k
-        if total > 1_000_000:
-            raise ValueError(f"(p1*p2)**k = {total} is huge; use mode='sampled' instead.")
-        N = total
-        sequence_xy = np.zeros((N, k, 2), dtype=np.int64)
-        for idx in range(N):
-            for t in range(k):
-                flat_idx = (idx // (p_flat**t)) % p_flat
-                ax = flat_idx // p2  # rows
-                ay = flat_idx % p2  # cols
-                sequence_xy[idx, t, 0] = ax
-                sequence_xy[idx, t, 1] = ay
-    else:
-        N = int(num_samples)
-        sequence_xy = np.empty((N, k, 2), dtype=np.int64)
-        sequence_xy[:, :, 0] = np.random.randint(0, p1, size=(N, k))  # ax (rows)
-        sequence_xy[:, :, 1] = np.random.randint(0, p2, size=(N, k))  # ay (cols)
-
-    X = np.zeros((N, k, p_flat), dtype=np.float32)
-    Y = np.zeros((N, k, p_flat), dtype=np.float32)
-
-    for i in range(N):
-        sx, sy = 0, 0  # cumulative shift for Y
-        for t in range(k):
-            ax, ay = int(sequence_xy[i, t, 0]), int(sequence_xy[i, t, 1])
-            rolled = np.roll(np.roll(template, shift=ax, axis=0), shift=ay, axis=1)
-            X[i, t, :] = rolled.ravel()
-            sx = (sx + ax) % p1
-            sy = (sy + ay) % p2
-            Y[i, t, :] = np.roll(np.roll(template, shift=sx, axis=0), shift=sy, axis=1).ravel()
-
-    if not return_all_outputs:
-        Y = Y[:, -1, :]
-
-    return X, Y, sequence_xy
-
-
-def build_modular_addition_sequence_dataset_D3(
-    template: np.ndarray,
-    k: int,
-    mode: str = "sampled",
-    num_samples: int = 65536,
-    return_all_outputs: bool = False,
-    dihedral_n: int = 3,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Build dihedral group composition dataset for sequence length k.
-
-    Uses the regular representation of D_n to transform the template.
-    For a sequence of k group elements (g1, g2, ..., gk), we compute:
-    - X[i, t, :] = regular_rep(g_t) @ template  (template transformed by g_t)
-    - Y[i, :] = regular_rep(g1 * g2 * ... * gk) @ template  (template transformed by composition)
-
-    Args:
-        template: (group_order,) template array, where group_order = 2*n for D_n
-        k: sequence length (number of group elements to compose)
-        mode: "sampled" or "exhaustive"
-        num_samples: number of samples for "sampled" mode
-        return_all_outputs: if True, return intermediate outputs after each composition
-        dihedral_n: the n parameter for the dihedral group D_n (default 3 for D3)
-
-    Returns:
-        X: (N, k, group_order) input sequences
-        Y: (N, group_order) or (N, k-1, group_order) target outputs
-        sequence: (N, k) integer indices of group elements per token
-    """
-    from escnn.group import DihedralGroup
-
-    # Create D_n group (dihedral group of order 2*n)
-    dihedral_group = DihedralGroup(N=dihedral_n)
-    group_order = dihedral_group.order()  # = 2 * dihedral_n
-
-    assert template.shape == (group_order,), (
-        f"template must be ({group_order},), got {template.shape}"
-    )
-
-    # Get regular representation and list of elements
-    regular_rep = dihedral_group.representations["regular"]
-    elements = list(dihedral_group.elements)
-    n_elements = len(elements)  # = 6
-
-    # Pre-compute representation matrices for all elements
-    rep_matrices = np.array([regular_rep(g) for g in elements])  # (6, 6, 6)
-
-    if mode == "exhaustive":
-        # Total number of sequences: n_elements^k
-        total = n_elements**k
-        if total > 1_000_000:
-            raise ValueError(f"n_elements^k = {total} is huge; use mode='sampled' instead.")
-        N = total
-
-        # Generate all possible sequences of k element indices
-        sequence = np.zeros((N, k), dtype=np.int64)
-        for idx in range(N):
-            for t in range(k):
-                sequence[idx, t] = (idx // (n_elements**t)) % n_elements
-        # print(f"sequence: {sequence}") Looking good.
-    else:
-        # Sampled mode: randomly sample sequences
-        N = int(num_samples)
-        sequence = np.random.randint(0, n_elements, size=(N, k), dtype=np.int64)
-
-    # Initialize output arrays
-    X = np.zeros((N, k, group_order), dtype=np.float32)
-    Y = np.zeros((N, k, group_order), dtype=np.float32)
-
-    for i in range(N):
-        # Compute cumulative composition of group elements
-        cumulative_rep = np.eye(group_order)  # Identity matrix (identity element)
-
-        for t in range(k):
-            elem_idx = sequence[i, t]  # Take the index of the t-th element of the i-th sequence.
-            g_rep = rep_matrices[
-                elem_idx
-            ]  # Regular representation, a 6x6 matrix representing the group element.
-
-            # X[i, t] = template transformed by g_t
-            X[i, t, :] = g_rep @ template
-
-            # Update cumulative composition: g1 * g2 * ... * g_t
-            # cumulative_rep = cumulative_rep @ g_rep
-            cumulative_rep = g_rep @ cumulative_rep
-
-            # Y[i, t] = template transformed by cumulative composition
-            Y[i, t, :] = cumulative_rep @ template
-
-    if not return_all_outputs:
-        # Only return final output
-        Y = Y[:, -1, :]  # (N, group_order)
-    else:
-        # Return all intermediate outputs (skip first since it's just g1, not a composition)
-        Y = Y[:, 1:, :]  # (N, k-1, group_order)
-
-    return X, Y, sequence
+        return X, Y, sequence
 
 
 def build_modular_addition_sequence_dataset_generic(
@@ -537,35 +435,6 @@ def sequence_to_paths_xy(sequence_xy: np.ndarray, p1: int, p2: int) -> np.ndarra
 # ---------------------------------------------------------------------------
 # Dataset functions moved from datasets.py
 # ---------------------------------------------------------------------------
-
-
-def load_dataset(config):
-    """Load dataset based on configuration."""
-    import src.template as template
-
-    tpl = template.template_selector(config)
-
-    if config["group_name"] == "cnxcn":
-        X, Y = cnxcn_dataset(tpl)
-
-    elif config["group_name"] == "cn":
-        X, Y = cn_dataset(tpl)
-
-    else:
-        X, Y = group_dataset(config["group"], tpl)
-
-    print(f"dataset_fraction: {config['dataset_fraction']}")
-
-    if config["dataset_fraction"] != 1.0:
-        assert 0 < config["dataset_fraction"] <= 1.0, "fraction must be in (0, 1]"
-        N = X.shape[0]
-        n_sample = int(np.ceil(N * config["dataset_fraction"]))
-        rng = np.random.default_rng(config["seed"])
-        indices = rng.choice(N, size=n_sample, replace=False)
-        X = X[indices]
-        Y = Y[indices]
-
-    return X, Y, tpl
 
 
 def group_dataset(group, template):

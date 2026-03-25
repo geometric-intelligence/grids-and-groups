@@ -2,7 +2,7 @@
 # Tiny parameter grid for fast execution (< 1 min)
 # Total: 2 x 1 x 1 = 2 experiments
 
-base_config: "src/config.yaml"
+base_config: "src/configs/config.yaml"
 n_seeds: 1
 
 global_overrides:

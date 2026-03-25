@@ -111,7 +111,7 @@ training:
   # Training Dynamics
   grad_clip: 0.1
   verbose_interval: 1000
-  save_param_interval: 10      # Save params every N steps/epochs
+  save_param_interval: null      # Save params every N steps/epochs
                               # Set to null to only save initial & final (memory efficient for sweeps)
 
   # Early Stopping (optional)
@@ -131,3 +131,11 @@ analysis:
   checkpoints:
   - 0.0
   - 1.0  # Fraction of training for analysis
+
+  # Plot flags: set to false to skip individual plots (useful for large sweeps)
+  plots:
+    template: true           # template.pdf (always)
+    training_loss: true      # training_loss*.pdf
+    predictions: true        # predictions_over_time.pdf
+    power_spectrum: true     # power_spectrum_analysis.pdf (cn / group only)
+    wmix: true               # wmix_frequency_structure.pdf (cnxcn + QuadraticRNN only)

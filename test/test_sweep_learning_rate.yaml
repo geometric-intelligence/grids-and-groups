@@ -1,7 +1,7 @@
 # Test sweep config mirroring src/sweep_configs/learning_rate_sweep.yaml
 # Minimal parameters for fast execution (< 1 min)
 
-base_config: "src/config.yaml"
+base_config: "src/configs/config.yaml"
 n_seeds: 1
 
 global_overrides:

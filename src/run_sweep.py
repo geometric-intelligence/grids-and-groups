@@ -7,6 +7,7 @@ with multiple seeds for uncertainty quantification.
 """
 
 import argparse
+import contextlib
 import copy
 import datetime
 import multiprocessing
@@ -129,6 +130,7 @@ def generate_experiment_name(overrides: dict) -> str:
         "n_freqs": "f",
         "learning_rate": "lr",
         "batch_size": "bs",
+        "init_scale": "is",
     }
 
     def extract_params(d, prefix=""):
@@ -188,6 +190,15 @@ def generate_experiment_configs(sweep_config: dict) -> list[tuple[str, dict]]:
 
     else:
         raise ValueError("Sweep config must contain either 'experiments' or 'parameter_grid'")
+
+    # Optionally rescale init_scale based on k: init_scale_k = base^(3/(k+1))
+    if sweep_config.get("scale_init_with_k", False):
+        for _, cfg in experiment_configs:
+            k = cfg["data"]["k"]
+            base_scale = cfg["model"]["init_scale"]
+            adjusted = base_scale ** (3.0 / (k + 1))
+            cfg["model"]["init_scale"] = adjusted
+        print("Adjusted init_scale per k: init_scale_k = base^(3/(k+1))")
 
     # Validate: Check for duplicate experiment names
     exp_names = [name for name, _ in experiment_configs]
@@ -272,8 +283,16 @@ def run_single_seed(
         # Import here to avoid circular dependency
         import src.main as main
 
-        # Run training
-        result = main.train_single_run(seed_config, run_dir=seed_dir)
+        # Check if quiet mode is enabled (suppress stdout but keep stderr for errors)
+        quiet = seed_config.get("training", {}).get("quiet", False)
+
+        # Run training (with optional stdout suppression)
+        if quiet:
+            with open(os.devnull, "w") as devnull:
+                with contextlib.redirect_stdout(devnull):
+                    result = main.train_single_run(seed_config, run_dir=seed_dir)
+        else:
+            result = main.train_single_run(seed_config, run_dir=seed_dir)
 
         # Save run summary
         run_summary = {
@@ -291,11 +310,12 @@ def run_single_seed(
         with open(summary_path, "w") as f:
             yaml.dump(run_summary, f, default_flow_style=False, indent=2)
 
-        print(f"✓ {exp_name} seed {seed} completed successfully (GPU: {gpu_id})")
-        if run_summary["final_train_loss"] is not None:
-            print(f"  Train loss: {run_summary['final_train_loss']:.6f}")
-        if run_summary["final_val_loss"] is not None:
-            print(f"  Val loss: {run_summary['final_val_loss']:.6f}")
+        if not quiet:
+            print(f"✓ {exp_name} seed {seed} completed successfully (GPU: {gpu_id})")
+            if run_summary["final_train_loss"] is not None:
+                print(f"  Train loss: {run_summary['final_train_loss']:.6f}")
+            if run_summary["final_val_loss"] is not None:
+                print(f"  Val loss: {run_summary['final_val_loss']:.6f}")
 
         return run_summary
 
@@ -547,7 +567,7 @@ def run_parameter_sweep(
     # Create sweep directory
     sweep_name = os.path.splitext(os.path.basename(sweep_file))[0]
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    sweep_dir = Path("sweep_results") / f"{sweep_name}_{timestamp}"
+    sweep_dir = Path("sweep_results").resolve() / f"{sweep_name}_{timestamp}"
     sweep_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\nSweep directory: {sweep_dir}")

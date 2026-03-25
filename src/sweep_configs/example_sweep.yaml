@@ -2,7 +2,7 @@
 # This demonstrates how to sweep over different hyperparameters
 
 # Base configuration to inherit from
-base_config: "src/config.yaml"
+base_config: "src/configs/config.yaml"
 
 # Number of seeds per configuration (for uncertainty quantification)
 n_seeds: 1

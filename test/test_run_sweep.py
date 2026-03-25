@@ -191,7 +191,7 @@ def _run_sweep_and_check(sweep_config_path, mock_all_plots, expected_experiments
     with tempfile.TemporaryDirectory() as tmpdir:
         # run_parameter_sweep creates sweep_results/ relative to cwd.
         # We chdir to tmpdir so output goes there, but the sweep config
-        # uses relative paths like "src/config.yaml" resolved from repo root.
+        # uses relative paths like "src/configs/config.yaml" resolved from repo root.
         # Fix: rewrite base_config to absolute path before running.
         import yaml
 

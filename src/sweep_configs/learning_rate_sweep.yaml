@@ -1,7 +1,7 @@
 # Learning rate sweep configuration
 # Compares different learning rates and optimizers
 
-base_config: "src/config.yaml"
+base_config: "src/configs/config.yaml"
 n_seeds: 5
 
 experiments:

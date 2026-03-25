@@ -128,6 +128,11 @@ def produce_plots_2d(
     """
     print("\n=== Generating Analysis Plots ===")
 
+    plots = config.get("analysis", {}).get("plots", {})
+    plot_training_loss = plots.get("training_loss", True)
+    plot_predictions = plots.get("predictions", True)
+    plot_wmix = plots.get("wmix", True)
+
     ### ----- COMPUTE X-AXIS VALUES ----- ###
     group_name = config["data"]["group_name"]
     if group_name == "cn":
@@ -160,7 +165,7 @@ def produce_plots_2d(
 
     ### ----- GENERATE EVALUATION DATA ----- ###
     print("Generating evaluation data for visualization...")
-    X_seq_2d, Y_seq_2d, _ = dataset.build_modular_addition_sequence_dataset_2d(
+    X_seq_2d, Y_seq_2d, _ = dataset.OnlineModularAdditionDataset2D.generate_dataset(
         config["data"]["p1"],
         config["data"]["p2"],
         template_2d,
@@ -184,66 +189,66 @@ def produce_plots_2d(
     )
 
     ### ----- PLOT TRAINING LOSS ----- ###
-    print("\nPlotting training loss...")
+    if plot_training_loss:
+        print("\nPlotting training loss...")
 
-    # Plot 1: Loss vs Steps/Epochs
-    viz.plot_train_loss_with_theory(
-        loss_history=train_loss_hist,
-        template_2d=template_2d,
-        p1=config["data"]["p1"],
-        p2=config["data"]["p2"],
-        x_values=None,
-        x_label=x_label_steps,
-        save_path=os.path.join(run_dir, "training_loss_vs_steps.pdf"),
-        show=False,
-    )
+        # Plot 1: Loss vs Steps/Epochs
+        viz.plot_train_loss_with_theory(
+            loss_history=train_loss_hist,
+            template_2d=template_2d,
+            p1=config["data"]["p1"],
+            p2=config["data"]["p2"],
+            x_values=None,
+            x_label=x_label_steps,
+            save_path=os.path.join(run_dir, "training_loss_vs_steps.pdf"),
+            show=False,
+        )
 
-    # Plot 2: Loss vs Samples Seen
-    viz.plot_train_loss_with_theory(
-        loss_history=train_loss_hist,
-        template_2d=template_2d,
-        p1=config["data"]["p1"],
-        p2=config["data"]["p2"],
-        x_values=samples_seen,
-        x_label="Samples Seen",
-        save_path=os.path.join(run_dir, "training_loss_vs_samples.pdf"),
-        show=False,
-    )
+        # Plot 2: Loss vs Samples Seen
+        viz.plot_train_loss_with_theory(
+            loss_history=train_loss_hist,
+            template_2d=template_2d,
+            p1=config["data"]["p1"],
+            p2=config["data"]["p2"],
+            x_values=samples_seen,
+            x_label="Samples Seen",
+            save_path=os.path.join(run_dir, "training_loss_vs_samples.pdf"),
+            show=False,
+        )
 
-    # Plot 3: Loss vs Fraction of Space
-    viz.plot_train_loss_with_theory(
-        loss_history=train_loss_hist,
-        template_2d=template_2d,
-        p1=config["data"]["p1"],
-        p2=config["data"]["p2"],
-        x_values=fraction_of_space,
-        x_label="Samples Seen / Data Space Size",
-        save_path=os.path.join(run_dir, "training_loss_vs_fraction.pdf"),
-        show=False,
-    )
+        # Plot 3: Loss vs Fraction of Space
+        viz.plot_train_loss_with_theory(
+            loss_history=train_loss_hist,
+            template_2d=template_2d,
+            p1=config["data"]["p1"],
+            p2=config["data"]["p2"],
+            x_values=fraction_of_space,
+            x_label="Samples Seen / Data Space Size",
+            save_path=os.path.join(run_dir, "training_loss_vs_fraction.pdf"),
+            show=False,
+        )
 
     ### ----- PLOT MODEL PREDICTIONS ----- ###
-    print("Plotting model predictions over time...")
-    viz.plot_predictions_2d(
-        model,
-        param_hist,
-        X_seq_2d_t,
-        Y_seq_2d_t,
-        config["data"]["p1"],
-        config["data"]["p2"],
-        steps=checkpoint_indices,
-        save_path=os.path.join(run_dir, "predictions_over_time.pdf"),
-        show=False,
-    )
-
-    ### ----- PLOT FOURIER MODES REFERENCE ----- ###
-    print("Creating Fourier modes reference...")
-    tracked_freqs = power.topk_template_freqs(template_2d, K=10)
-    colors = plt.cm.tab10(np.linspace(0, 1, len(tracked_freqs)))
+    if plot_predictions:
+        print("Plotting model predictions over time...")
+        viz.plot_predictions_2d(
+            model,
+            param_hist,
+            X_seq_2d_t,
+            Y_seq_2d_t,
+            config["data"]["p1"],
+            config["data"]["p2"],
+            steps=checkpoint_indices,
+            save_path=os.path.join(run_dir, "predictions_over_time.pdf"),
+            show=False,
+        )
 
     ### ----- PLOT W_MIX FREQUENCY STRUCTURE (QuadraticRNN only) ----- ###
     model_type = config["model"]["model_type"]
-    if model_type == "QuadraticRNN":
+    if plot_wmix and model_type == "QuadraticRNN":
+        print("Creating Fourier modes reference...")
+        tracked_freqs = power.topk_template_freqs(template_2d, K=10)
+        colors = plt.cm.tab10(np.linspace(0, 1, len(tracked_freqs)))
         print("Visualizing W_mix frequency structure...")
         viz.plot_wmix_structure(
             param_hist,
@@ -257,7 +262,7 @@ def produce_plots_2d(
             save_path=os.path.join(run_dir, "wmix_frequency_structure.pdf"),
             show=False,
         )
-    else:
+    elif model_type != "QuadraticRNN":
         print("Skipping W_mix frequency structure plot (not applicable for SequentialMLP)")
 
     print("\n✓ All plots generated successfully!")
@@ -289,6 +294,11 @@ def produce_plots_1d(
         device: Device string ('cpu' or 'cuda')
     """
     print("\n=== Generating Analysis Plots (1D) ===")
+
+    plots = config.get("analysis", {}).get("plots", {})
+    plot_training_loss = plots.get("training_loss", True)
+    plot_predictions = plots.get("predictions", True)
+    plot_power_spectrum = plots.get("power_spectrum", True)
 
     ### ----- COMPUTE X-AXIS VALUES ----- ###
     p = config["data"]["p"]
@@ -329,7 +339,7 @@ def produce_plots_1d(
         )
         print(f"  Generated {X_eval_t.shape[0]} samples for visualization")
     else:
-        X_seq_1d, Y_seq_1d, _ = dataset.build_modular_addition_sequence_dataset_1d(
+        X_seq_1d, Y_seq_1d, _ = dataset.OnlineModularAdditionDataset1D.generate_dataset(
             config["data"]["p"],
             template_1d,
             config["data"]["k"],
@@ -352,26 +362,27 @@ def produce_plots_1d(
     )
 
     ### ----- PLOT TRAINING LOSS ----- ###
-    print("\nPlotting training loss...")
+    if plot_training_loss:
+        print("\nPlotting training loss...")
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    x_values = steps if training_mode == "online" else epochs
+        _, axes = plt.subplots(2, 2, figsize=(12, 10))
+        x_values = steps if training_mode == "online" else epochs
 
-    scale_configs = [
-        ("linear", "linear", "Linear Scale"),
-        ("linear", "log", "Log Y"),
-        ("log", "linear", "Log X"),
-        ("log", "log", "Log-Log"),
-    ]
+        scale_configs = [
+            ("linear", "linear", "Linear Scale"),
+            ("linear", "log", "Log Y"),
+            ("log", "linear", "Log X"),
+            ("log", "log", "Log-Log"),
+        ]
 
-    for ax, (xscale, yscale, title) in zip(axes.flat, scale_configs):
-        ax.plot(x_values, train_loss_hist, lw=2, color="#1f77b4")
-        ax.set_xscale(xscale)
-        ax.set_yscale(yscale)
-        ax.set_xlabel(x_label_steps)
-        ax.set_ylabel("Training Loss")
-        ax.set_title(title)
-        ax.grid(True, alpha=0.3)
+        for ax, (xscale, yscale, title) in zip(axes.flat, scale_configs):
+            ax.plot(x_values, train_loss_hist, lw=2, color="#1f77b4")
+            ax.set_xscale(xscale)
+            ax.set_yscale(yscale)
+            ax.set_xlabel(x_label_steps)
+            ax.set_ylabel("Training Loss")
+            ax.set_title(title)
+            ax.grid(True, alpha=0.3)
         if yscale == "log":
             ax.set_ylim(bottom=1.0)
 
@@ -385,27 +396,29 @@ def produce_plots_1d(
             fontsize=14,
         )
 
-    plt.tight_layout()
-    plt.savefig(os.path.join(run_dir, "training_loss.pdf"), bbox_inches="tight", dpi=150)
-    plt.close()
-    print(f"  ✓ Saved {os.path.join(run_dir, 'training_loss.pdf')}")
+        plt.tight_layout()
+        plt.savefig(os.path.join(run_dir, "training_loss.pdf"), bbox_inches="tight", dpi=150)
+        plt.close()
+        print(f"  ✓ Saved {os.path.join(run_dir, 'training_loss.pdf')}")
 
     ### ----- PLOT MODEL PREDICTIONS ----- ###
     if not use_group_style:
-        print("Plotting model predictions over time...")
-        viz.plot_predictions_1d(
-            model,
-            param_hist,
-            X_seq_1d_t,
-            Y_seq_1d_t,
-            p,
-            steps=checkpoint_indices,
-            save_path=os.path.join(run_dir, "predictions_over_time.pdf"),
-            show=False,
-        )
+        if plot_predictions:
+            print("Plotting model predictions over time...")
+            viz.plot_predictions_1d(
+                model,
+                param_hist,
+                X_seq_1d_t,
+                Y_seq_1d_t,
+                p,
+                steps=checkpoint_indices,
+                save_path=os.path.join(run_dir, "predictions_over_time.pdf"),
+                show=False,
+            )
 
     ### ----- PLOT POWER SPECTRUM ANALYSIS ----- ###
-    print("Plotting power spectrum over time...")
+    if plot_power_spectrum:
+        print("Plotting power spectrum over time...")
 
     if use_group_style:
         optimizer_name = config["training"]["optimizer"]
@@ -485,6 +498,11 @@ def produce_plots_group(
 
     print(f"\n=== Generating Analysis Plots ({group_label}) ===")
 
+    plots = config.get("analysis", {}).get("plots", {})
+    plot_training_loss = plots.get("training_loss", True)
+    plot_predictions = plots.get("predictions", True)
+    plot_power_spectrum = plots.get("power_spectrum", True)
+
     group_order = group.order()
 
     k = config["data"]["k"]
@@ -560,25 +578,26 @@ def produce_plots_group(
     print(f"Analysis checkpoints: {checkpoint_indices} (out of {total_checkpoints})")
 
     ### ----- PLOT TRAINING LOSS ----- ###
-    print("\nPlotting training loss...")
+    if plot_training_loss:
+        print("\nPlotting training loss...")
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        _, axes = plt.subplots(2, 2, figsize=(12, 10))
 
-    scale_configs = [
-        ("linear", "linear", "Linear Scale"),
-        ("linear", "log", "Log Y"),
-        ("log", "linear", "Log X"),
-        ("log", "log", "Log-Log"),
-    ]
+        scale_configs = [
+            ("linear", "linear", "Linear Scale"),
+            ("linear", "log", "Log Y"),
+            ("log", "linear", "Log X"),
+            ("log", "log", "Log-Log"),
+        ]
 
-    for ax, (xscale, yscale, title) in zip(axes.flat, scale_configs):
-        ax.plot(x_values, train_loss_hist, lw=2, color="#1f77b4")
-        ax.set_xscale(xscale)
-        ax.set_yscale(yscale)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel("Training Loss")
-        ax.set_title(title)
-        ax.grid(True, alpha=0.3)
+        for ax, (xscale, yscale, title) in zip(axes.flat, scale_configs):
+            ax.plot(x_values, train_loss_hist, lw=2, color="#1f77b4")
+            ax.set_xscale(xscale)
+            ax.set_yscale(yscale)
+            ax.set_xlabel(x_label)
+            ax.set_ylabel("Training Loss")
+            ax.set_title(title)
+            ax.grid(True, alpha=0.3)
         if yscale == "log":
             ax.set_ylim(bottom=1.0)
 
@@ -596,39 +615,41 @@ def produce_plots_group(
     print(f"  ✓ Saved {training_loss_path}")
 
     ### ----- PLOT MODEL PREDICTIONS OVER TIME ----- ###
-    print("\nPlotting model predictions over time...")
-    viz.plot_predictions_group(
-        model=model,
-        param_hist=param_hist,
-        X_eval=X_eval_t,
-        Y_eval=Y_eval_t,
-        group_order=group_order,
-        checkpoint_indices=checkpoint_indices,
-        save_path=os.path.join(run_dir, "predictions_over_time.pdf"),
-        group_label=group_label,
-    )
-    print(f"  ✓ Saved {os.path.join(run_dir, 'predictions_over_time.pdf')}")
+    if plot_predictions:
+        print("\nPlotting model predictions over time...")
+        viz.plot_predictions_group(
+            model=model,
+            param_hist=param_hist,
+            X_eval=X_eval_t,
+            Y_eval=Y_eval_t,
+            group_order=group_order,
+            checkpoint_indices=checkpoint_indices,
+            save_path=os.path.join(run_dir, "predictions_over_time.pdf"),
+            group_label=group_label,
+        )
+        print(f"  ✓ Saved {os.path.join(run_dir, 'predictions_over_time.pdf')}")
 
     ### ----- PLOT POWER SPECTRUM OVER TIME ----- ###
-    print("\nPlotting power spectrum over time...")
-    optimizer_name = config["training"]["optimizer"]
-    init_scale = config["model"]["init_scale"]
-    viz.plot_power_group(
-        model=model,
-        param_hist=param_hist,
-        param_save_indices=param_save_indices,
-        X_eval=X_eval_t,
-        template=template,
-        group=group,
-        k=k,
-        optimizer=optimizer_name,
-        init_scale=init_scale,
-        save_path=os.path.join(run_dir, "power_spectrum_analysis.pdf"),
-        group_label=group_label,
-        learning_rate=config["training"]["learning_rate"],
-        hidden_dim=config["model"]["hidden_dim"],
-    )
-    print(f"  ✓ Saved {os.path.join(run_dir, 'power_spectrum_analysis.pdf')}")
+    if plot_power_spectrum:
+        print("\nPlotting power spectrum over time...")
+        optimizer_name = config["training"]["optimizer"]
+        init_scale = config["model"]["init_scale"]
+        viz.plot_power_group(
+            model=model,
+            param_hist=param_hist,
+            param_save_indices=param_save_indices,
+            X_eval=X_eval_t,
+            template=template,
+            group=group,
+            k=k,
+            optimizer=optimizer_name,
+            init_scale=init_scale,
+            save_path=os.path.join(run_dir, "power_spectrum_analysis.pdf"),
+            group_label=group_label,
+            learning_rate=config["training"]["learning_rate"],
+            hidden_dim=config["model"]["hidden_dim"],
+        )
+        print(f"  ✓ Saved {os.path.join(run_dir, 'power_spectrum_analysis.pdf')}")
 
     print(f"\n✓ All {group_label} plots generated successfully!")
 
@@ -700,15 +721,17 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
         tpl = template_1d  # For consistency in code below
 
         # Visualize 1D template
-        print("Visualizing template...")
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(template_1d)
-        ax.set_xlabel("Position")
-        ax.set_ylabel("Value")
-        ax.set_title("1D Template")
-        ax.grid(True, alpha=0.3)
-        fig.savefig(os.path.join(run_dir, "template.pdf"), bbox_inches="tight", dpi=150)
-        print("  ✓ Saved template")
+        if config.get("analysis", {}).get("plots", {}).get("template", True):
+            print("Visualizing template...")
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.plot(template_1d)
+            ax.set_xlabel("Position")
+            ax.set_ylabel("Value")
+            ax.set_title("1D Template")
+            ax.grid(True, alpha=0.3)
+            fig.savefig(os.path.join(run_dir, "template.pdf"), bbox_inches="tight", dpi=150)
+            plt.close(fig)
+            print("  ✓ Saved template")
 
     elif group_name == "cnxcn":
         # 2D template generation
@@ -730,10 +753,12 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
         tpl = template_2d  # For consistency in code below
 
         # Visualize 2D template
-        print("Visualizing template...")
-        fig, ax = viz.plot_signal_2d(template_2d, title="Template", cmap="gray")
-        fig.savefig(os.path.join(run_dir, "template.pdf"), bbox_inches="tight", dpi=150)
-        print("  ✓ Saved template")
+        if config.get("analysis", {}).get("plots", {}).get("template", True):
+            print("Visualizing template...")
+            fig, ax = viz.plot_signal_2d(template_2d, title="Template", cmap="gray")
+            fig.savefig(os.path.join(run_dir, "template.pdf"), bbox_inches="tight", dpi=150)
+            plt.close(fig)
+            print("  ✓ Saved template")
     elif group_name in ("dihedral", "octahedral", "A5"):
         # Construct the escnn group object
         if group_name == "dihedral":
@@ -807,20 +832,21 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
         print(f"Template shape: {tpl.shape}")
 
         # Visualize template
-        print("Visualizing template...")
-        fig, ax = plt.subplots(figsize=(max(8, group_order // 5), 4))
-        ax.bar(range(group_order), tpl)
-        ax.set_xlabel("Group element index")
-        ax.set_ylabel("Value")
-        title = f"{group_label} Template (order={group_order}, type={template_type})"
-        if template_type == "custom_fourier":
-            title += f"\npowers={powers}"
-        ax.set_title(title)
-        if group_order <= 30:
-            ax.set_xticks(range(group_order))
-        fig.savefig(os.path.join(run_dir, "template.pdf"), bbox_inches="tight", dpi=150)
-        plt.close(fig)
-        print("  ✓ Saved template")
+        if config.get("analysis", {}).get("plots", {}).get("template", True):
+            print("Visualizing template...")
+            fig, ax = plt.subplots(figsize=(max(8, group_order // 5), 4))
+            ax.bar(range(group_order), tpl)
+            ax.set_xlabel("Group element index")
+            ax.set_ylabel("Value")
+            title = f"{group_label} Template (order={group_order}, type={template_type})"
+            if template_type == "custom_fourier":
+                title += f"\npowers={powers}"
+            ax.set_title(title)
+            if group_order <= 30:
+                ax.set_xticks(range(group_order))
+            fig.savefig(os.path.join(run_dir, "template.pdf"), bbox_inches="tight", dpi=150)
+            plt.close(fig)
+            print("  ✓ Saved template")
     else:
         raise ValueError(
             f"group_name must be 'cn', 'cnxcn', 'dihedral', 'octahedral', or 'A5', got {group_name}"
@@ -1033,7 +1059,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
             # Sequence models (QuadraticRNN, SequentialMLP) use sequence datasets
             if group_name == "cn":
                 # Generate training dataset
-                X_train, Y_train, _ = dataset.build_modular_addition_sequence_dataset_1d(
+                X_train, Y_train, _ = dataset.OnlineModularAdditionDataset1D.generate_dataset(
                     config["data"]["p"],
                     template_1d,
                     config["data"]["k"],
@@ -1044,7 +1070,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
 
                 # Generate validation dataset
                 val_samples = max(1000, config["data"]["num_samples"] // 10)
-                X_val, Y_val, _ = dataset.build_modular_addition_sequence_dataset_1d(
+                X_val, Y_val, _ = dataset.OnlineModularAdditionDataset1D.generate_dataset(
                     config["data"]["p"],
                     template_1d,
                     config["data"]["k"],
@@ -1054,7 +1080,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
                 )
             elif group_name == "cnxcn":
                 # Generate training dataset
-                X_train, Y_train, _ = dataset.build_modular_addition_sequence_dataset_2d(
+                X_train, Y_train, _ = dataset.OnlineModularAdditionDataset2D.generate_dataset(
                     config["data"]["p1"],
                     config["data"]["p2"],
                     template_2d,
@@ -1066,7 +1092,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
 
                 # Generate validation dataset
                 val_samples = max(1000, config["data"]["num_samples"] // 10)
-                X_val, Y_val, _ = dataset.build_modular_addition_sequence_dataset_2d(
+                X_val, Y_val, _ = dataset.OnlineModularAdditionDataset2D.generate_dataset(
                     config["data"]["p1"],
                     config["data"]["p2"],
                     template_2d,
@@ -1270,8 +1296,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config",
         type=str,
-        default="src/config.yaml",
-        help="Path to config YAML file (default: src/config.yaml)",
+        default="src/configs/config.yaml",
+        help="Path to config YAML file (default: src/configs/config.yaml)",
     )
 
     args = parser.parse_args()

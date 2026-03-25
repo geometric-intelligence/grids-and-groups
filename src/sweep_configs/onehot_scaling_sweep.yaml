@@ -2,7 +2,7 @@
 # Explores different group sizes (p), hidden dimensions, and sequence lengths
 # Total: 20 × 20 × 3 = 1200 experiments
 
-base_config: "src/config.yaml"
+base_config: "src/configs/config.yaml"
 n_seeds: 1
 
 # Fixed parameters applied to all experiments
@@ -10,11 +10,35 @@ global_overrides:
   data:
     dimension: 1
     template_type: 'onehot'
+    group_name: cn
+  
+  training:
+    mode: online
+    learning_rate: 1.0e-3
+    reduction_threshold: 0.999
+    num_steps: 1000000
+    optimizer: adam
+    quiet: true  # Suppress training stdout (errors still shown via stderr)
+
+  analysis:
+    # Plot flags: set to false to skip individual plots (useful for large sweeps)
+    plots:
+      template: true           # template.pdf (always)
+      training_loss: true      # training_loss*.pdf
+      predictions: false        # predictions_over_time.pdf
+      power_spectrum: false
 
 # Parameter grid specification (only varying parameters)
+# parameter_grid:
+#   data:
+#     k: [2, 3]
+#     p: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+#   model:
+#     hidden_dim: [18, 36, 54, 72, 90, 108, 126, 144, 162, 180, 198, 216, 234, 252, 270, 288, 306, 324, 342, 360, 378]
 parameter_grid:
   data:
-    p: [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
-    k: [2, 3, 4]
+    k: [5]
+    p: [16, 17, 18, 19, 20, 21, 22]
   model:
-    hidden_dim: [80, 160, 240, 320, 400, 480, 560, 640, 720, 800, 880, 960, 1040, 1120, 1200, 1280, 1360, 1440, 1520, 1600]
+    hidden_dim: [18, 36, 54, 72, 90, 108, 126, 144, 162, 180, 198, 216, 234, 252, 270, 288, 306, 324, 342, 360, 378]
+
