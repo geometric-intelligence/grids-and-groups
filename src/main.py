@@ -630,11 +630,12 @@ def produce_plots_group(
         print(f"  ✓ Saved {os.path.join(run_dir, 'predictions_over_time.pdf')}")
 
     ### ----- PLOT POWER SPECTRUM OVER TIME ----- ###
+    power_data = None
     if plot_power_spectrum:
         print("\nPlotting power spectrum over time...")
         optimizer_name = config["training"]["optimizer"]
         init_scale = config["model"]["init_scale"]
-        viz.plot_power_group(
+        power_data = viz.plot_power_group(
             model=model,
             param_hist=param_hist,
             param_save_indices=param_save_indices,
@@ -650,6 +651,23 @@ def produce_plots_group(
             hidden_dim=config["model"]["hidden_dim"],
         )
         print(f"  ✓ Saved {os.path.join(run_dir, 'power_spectrum_analysis.pdf')}")
+
+    ### ----- PLOT COMBINED LOSS AND POWER ----- ###
+    if plot_training_loss and power_data is not None:
+        print("\nPlotting combined loss and power...")
+        viz.plot_loss_and_power(
+            x_values=x_values,
+            train_loss_hist=train_loss_hist,
+            x_label=x_label,
+            power_data=power_data,
+            save_path=os.path.join(run_dir, "loss_and_power.pdf"),
+            title=(
+                f"{group_label} Training"
+                f" (k={k}, lr={config['training']['learning_rate']},"
+                f" init={config['model']['init_scale']:.0e},"
+                f" h={config['model']['hidden_dim']}, {config['training']['optimizer']})"
+            ),
+        )
 
     print(f"\n✓ All {group_label} plots generated successfully!")
 

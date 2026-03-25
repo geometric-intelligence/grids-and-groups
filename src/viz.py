@@ -101,6 +101,78 @@ def _permutation_from_groups_with_dead(
     return np.array(perm, dtype=int), ordered_keys, boundaries
 
 
+def _add_line_labels(ax, lines_info, fontsize=12):
+    """Add right-aligned colored text labels above (or below) each line.
+
+    Each label is anchored at the rightmost data-point of its line and
+    right-aligned so the text extends leftward inside the axes box.
+    When two labels would overlap vertically the lower one is placed
+    below its line instead.
+    """
+    if not lines_info:
+        return
+
+    label_data = []
+    for info in lines_info:
+        x_arr = np.asarray(info["x"])
+        y_arr = np.asarray(info["y"])
+        if len(x_arr) == 0:
+            continue
+        label_data.append({
+            "x_pos": x_arr[-1],
+            "y_pos": y_arr[-1],
+            "label": info["label"],
+            "color": info["color"],
+        })
+
+    if not label_data:
+        return
+
+    # Sort descending by y so highest line comes first
+    label_data.sort(key=lambda d: -d["y_pos"])
+
+    # Convert y-positions to axis-fraction for overlap detection
+    y_lo, y_hi = ax.get_ylim()
+    if ax.get_yscale() == "log":
+        log_lo = np.log10(max(y_lo, 1e-30))
+        log_hi = np.log10(max(y_hi, 1e-30))
+        span = max(log_hi - log_lo, 1e-30)
+        fracs = [
+            (np.log10(max(d["y_pos"], 1e-30)) - log_lo) / span
+            for d in label_data
+        ]
+    else:
+        span = max(y_hi - y_lo, 1e-30)
+        fracs = [(d["y_pos"] - y_lo) / span for d in label_data]
+
+    placements = ["above"] * len(label_data)
+    for i in range(1, len(label_data)):
+        if abs(fracs[i - 1] - fracs[i]) < 0.07:
+            placements[i] = "below"
+
+    # Keep labels inside the axes: flip if too close to the top/bottom edge
+    for i in range(len(label_data)):
+        if placements[i] == "above" and fracs[i] > 0.88:
+            placements[i] = "below"
+        elif placements[i] == "below" and fracs[i] < 0.12:
+            placements[i] = "above"
+
+    for d, placement in zip(label_data, placements):
+        y_off = 7 if placement == "above" else -7
+        va = "bottom" if placement == "above" else "top"
+        ax.annotate(
+            d["label"],
+            xy=(d["x_pos"], d["y_pos"]),
+            xytext=(-4, y_off),
+            textcoords="offset points",
+            color=d["color"],
+            fontsize=fontsize,
+            fontweight="bold",
+            va=va,
+            ha="right",
+        )
+
+
 def analyze_wout_frequency_dominance(state_dict, tracked_freqs, p1, p2):
     """Analyze W_out to find dominant frequency for each neuron.
 
@@ -585,9 +657,10 @@ def plot_power_cn(
 
     top_k = min(5, n_modes)
     top_mode_indices = np.argsort(template_power)[::-1][:top_k]
+    top_mode_indices = top_mode_indices[top_mode_indices != 0]
 
     _cn_power_colors = ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
-    colors_line = _cn_power_colors[:top_k]
+    colors_line = _cn_power_colors[:len(top_mode_indices)]
 
     valid_mask = np.array(epoch_numbers) > 0
     valid_epochs = np.array(epoch_numbers)[valid_mask]
@@ -598,52 +671,53 @@ def plot_power_cn(
 
     # Plot 1: Linear scales
     ax = axes[0]
+    lines_info = []
     for i, mode_idx in enumerate(top_mode_indices):
         power_values = model_powers[:, mode_idx]
-        ax.plot(
-            epoch_numbers,
-            power_values,
-            "-",
-            lw=2,
-            color=colors_line[i],
-            label=_mode_label(mode_idx),
-        )
+        ax.plot(epoch_numbers, power_values, "-", lw=2, color=colors_line[i])
         ax.axhline(template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i])
+        lines_info.append({
+            "x": epoch_numbers, "y": power_values,
+            "label": _mode_label(mode_idx), "color": colors_line[i],
+        })
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Power")
     ax.set_title("Linear Scales", fontsize=12)
-    ax.legend(loc="upper left", fontsize=7)
+    _add_line_labels(ax, lines_info)
     ax.grid(True, alpha=0.3)
 
     # Plot 2: Log x-axis only
     ax = axes[1]
+    lines_info = []
     for i, mode_idx in enumerate(top_mode_indices):
         power_values = valid_model_powers[:, mode_idx]
-        ax.plot(
-            valid_epochs, power_values, "-", lw=2, color=colors_line[i], label=_mode_label(mode_idx)
-        )
+        ax.plot(valid_epochs, power_values, "-", lw=2, color=colors_line[i])
         ax.axhline(template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i])
+        lines_info.append({
+            "x": valid_epochs, "y": power_values,
+            "label": _mode_label(mode_idx), "color": colors_line[i],
+        })
     ax.set_xscale("log")
     ax.set_xlabel("Epoch (log scale)")
     ax.set_ylabel("Power")
     ax.set_title("Log X-axis", fontsize=12)
-    ax.legend(loc="upper left", fontsize=7)
+    _add_line_labels(ax, lines_info)
     ax.grid(True, alpha=0.3)
 
     # Plot 3: Log-log scales
     ax = axes[2]
+    lines_info = []
     for i, mode_idx in enumerate(top_mode_indices):
         power_values = valid_model_powers[:, mode_idx]
         power_mask = power_values > 0
         if np.any(power_mask):
-            ax.plot(
-                valid_epochs[power_mask],
-                power_values[power_mask],
-                "-",
-                lw=2,
-                color=colors_line[i],
-                label=_mode_label(mode_idx),
-            )
+            x_data = valid_epochs[power_mask]
+            y_data = power_values[power_mask]
+            ax.plot(x_data, y_data, "-", lw=2, color=colors_line[i])
+            lines_info.append({
+                "x": x_data, "y": y_data,
+                "label": _mode_label(mode_idx), "color": colors_line[i],
+            })
         if template_power[mode_idx] > 0:
             ax.axhline(
                 template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i]
@@ -653,7 +727,7 @@ def plot_power_cn(
     ax.set_xlabel("Epoch (log scale)")
     ax.set_ylabel("Power (log scale)")
     ax.set_title("Log-Log Scales", fontsize=12)
-    ax.legend(loc="upper left", fontsize=7)
+    _add_line_labels(ax, lines_info)
     ax.grid(True, alpha=0.3)
 
     title_parts = [
@@ -672,6 +746,18 @@ def plot_power_cn(
         plt.savefig(save_path, bbox_inches="tight", dpi=150)
         print(f"  ✓ Saved {save_path}")
     plt.close()
+
+    labels = [_mode_label(idx) for idx in top_mode_indices]
+    return {
+        "valid_epochs": valid_epochs,
+        "valid_model_powers": valid_model_powers,
+        "model_powers": model_powers,
+        "epoch_numbers": epoch_numbers,
+        "template_power": template_power,
+        "top_irrep_indices": top_mode_indices,
+        "colors_line": colors_line,
+        "labels": labels,
+    }
 
 
 def plot_wmix_structure(
@@ -946,9 +1032,10 @@ def plot_power_group(
 
     top_k = min(5, n_irreps)
     top_irrep_indices = np.argsort(template_power)[::-1][:top_k]
+    top_irrep_indices = top_irrep_indices[top_irrep_indices != 0]
 
     _group_power_colors = ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
-    colors_line = _group_power_colors[:top_k]
+    colors_line = _group_power_colors[:len(top_irrep_indices)]
 
     valid_mask = np.array(epoch_numbers) > 0
     valid_epochs = np.array(epoch_numbers)[valid_mask]
@@ -961,57 +1048,53 @@ def plot_power_group(
 
     # Plot 1: Linear scales
     ax = axes[0]
+    lines_info = []
     for i, irrep_idx in enumerate(top_irrep_indices):
         power_values = model_powers[:, irrep_idx]
-        ax.plot(
-            epoch_numbers,
-            power_values,
-            "-",
-            lw=2,
-            color=colors_line[i],
-            label=_irrep_label(irrep_idx, irreps),
-        )
+        ax.plot(epoch_numbers, power_values, "-", lw=2, color=colors_line[i])
         ax.axhline(template_power[irrep_idx], linestyle="--", alpha=0.5, color=colors_line[i])
+        lines_info.append({
+            "x": epoch_numbers, "y": power_values,
+            "label": _irrep_label(irrep_idx, irreps), "color": colors_line[i],
+        })
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Power")
     ax.set_title("Linear Scales", fontsize=12)
-    ax.legend(loc="upper left", fontsize=7)
+    _add_line_labels(ax, lines_info)
     ax.grid(True, alpha=0.3)
 
     # Plot 2: Log x-axis only
     ax = axes[1]
+    lines_info = []
     for i, irrep_idx in enumerate(top_irrep_indices):
         power_values = valid_model_powers[:, irrep_idx]
-        ax.plot(
-            valid_epochs,
-            power_values,
-            "-",
-            lw=2,
-            color=colors_line[i],
-            label=_irrep_label(irrep_idx, irreps),
-        )
+        ax.plot(valid_epochs, power_values, "-", lw=2, color=colors_line[i])
         ax.axhline(template_power[irrep_idx], linestyle="--", alpha=0.5, color=colors_line[i])
+        lines_info.append({
+            "x": valid_epochs, "y": power_values,
+            "label": _irrep_label(irrep_idx, irreps), "color": colors_line[i],
+        })
     ax.set_xscale("log")
     ax.set_xlabel("Epoch (log scale)")
     ax.set_ylabel("Power")
     ax.set_title("Log X-axis", fontsize=12)
-    ax.legend(loc="upper left", fontsize=7)
+    _add_line_labels(ax, lines_info)
     ax.grid(True, alpha=0.3)
 
     # Plot 3: Log-log scales
     ax = axes[2]
+    lines_info = []
     for i, irrep_idx in enumerate(top_irrep_indices):
         power_values = valid_model_powers[:, irrep_idx]
         power_mask = power_values > 0
         if np.any(power_mask):
-            ax.plot(
-                valid_epochs[power_mask],
-                power_values[power_mask],
-                "-",
-                lw=2,
-                color=colors_line[i],
-                label=_irrep_label(irrep_idx, irreps),
-            )
+            x_data = valid_epochs[power_mask]
+            y_data = power_values[power_mask]
+            ax.plot(x_data, y_data, "-", lw=2, color=colors_line[i])
+            lines_info.append({
+                "x": x_data, "y": y_data,
+                "label": _irrep_label(irrep_idx, irreps), "color": colors_line[i],
+            })
         if template_power[irrep_idx] > 0:
             ax.axhline(template_power[irrep_idx], linestyle="--", alpha=0.5, color=colors_line[i])
     ax.set_xscale("log")
@@ -1019,7 +1102,7 @@ def plot_power_group(
     ax.set_xlabel("Epoch (log scale)")
     ax.set_ylabel("Power (log scale)")
     ax.set_title("Log-Log Scales", fontsize=12)
-    ax.legend(loc="upper left", fontsize=7)
+    _add_line_labels(ax, lines_info)
     ax.grid(True, alpha=0.3)
 
     title_parts = [
@@ -1036,6 +1119,88 @@ def plot_power_group(
 
     if save_path:
         plt.savefig(save_path, bbox_inches="tight", dpi=150)
+    plt.close()
+
+    labels = [_irrep_label(idx, irreps) for idx in top_irrep_indices]
+    return {
+        "valid_epochs": valid_epochs,
+        "valid_model_powers": valid_model_powers,
+        "model_powers": model_powers,
+        "epoch_numbers": epoch_numbers,
+        "template_power": template_power,
+        "top_irrep_indices": top_irrep_indices,
+        "colors_line": colors_line,
+        "labels": labels,
+    }
+
+
+def plot_loss_and_power(
+    x_values,
+    train_loss_hist,
+    x_label,
+    power_data,
+    save_path=None,
+    title=None,
+):
+    """Create combined 2-row plot: Log-Log loss (top) and Log-X power spectrum (bottom).
+
+    The two subplots share the x-axis (log-scale epochs/steps).
+
+    Args:
+        x_values: x-axis values for loss plot (epochs or steps)
+        train_loss_hist: training loss history
+        x_label: x-axis label (e.g., "Epoch")
+        power_data: dict returned by plot_power_group or plot_power_cn
+        save_path: path to save the figure
+        title: optional suptitle
+    """
+    fig, (ax_loss, ax_power) = plt.subplots(
+        2, 1, figsize=(4, 8), sharex=True,
+        gridspec_kw={"hspace": 0.10},
+    )
+
+    # --- Top row: Log-Log training loss ---
+    x_arr = np.asarray(x_values)
+    loss_arr = np.asarray(train_loss_hist)
+    pos_mask = x_arr > 0
+    ax_loss.plot(x_arr[pos_mask], loss_arr[pos_mask], lw=2, color="#1f77b4")
+    ax_loss.set_xscale("log")
+    ax_loss.set_yscale("log")
+    ax_loss.set_ylabel("Training Loss", fontsize=11)
+    ax_loss.grid(True, alpha=0.3)
+    ax_loss.tick_params(labelbottom=False)
+
+    # --- Bottom row: Log-X power spectrum with inline labels ---
+    valid_epochs = power_data["valid_epochs"]
+    valid_model_powers = power_data["valid_model_powers"]
+    template_power = power_data["template_power"]
+    top_indices = power_data["top_irrep_indices"]
+    colors_line = power_data["colors_line"]
+    labels = power_data["labels"]
+
+    lines_info = []
+    for i, idx in enumerate(top_indices):
+        pv = valid_model_powers[:, idx]
+        ax_power.plot(valid_epochs, pv, "-", lw=2, color=colors_line[i])
+        ax_power.axhline(template_power[idx], linestyle="--", alpha=0.5, color=colors_line[i])
+        lines_info.append({
+            "x": valid_epochs, "y": pv,
+            "label": labels[i], "color": colors_line[i],
+        })
+    _add_line_labels(ax_power, lines_info, fontsize=10)
+
+    ax_power.set_xscale("log")
+    ax_power.set_xlabel(x_label, fontsize=11)
+    ax_power.set_ylabel("Power", fontsize=11)
+    ax_power.grid(True, alpha=0.3)
+
+    if title:
+        fig.suptitle(title, fontsize=12, fontweight="bold")
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight", dpi=150)
+        print(f"  ✓ Saved {save_path}")
     plt.close()
 
 
