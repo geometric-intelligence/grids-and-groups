@@ -1402,8 +1402,9 @@ def plot_combined_loss_and_power(
     Each run directory must contain train_loss_history.npy, power_data.npz,
     and config.yaml.
     """
-    import yaml
     from pathlib import Path
+
+    import yaml
 
     n_cols = len(run_dirs)
     fig, axes = plt.subplots(2, n_cols, figsize=(5 * n_cols, 8))
@@ -1459,10 +1460,14 @@ def plot_combined_loss_and_power(
             pv = valid_model_powers[:, idx]
             ax.plot(valid_epochs, pv, "-", lw=1.5, color=colors_line[i])
             ax.axhline(template_power[idx], linestyle="--", alpha=0.4, color=colors_line[i])
-            lines_info.append({
-                "x": valid_epochs, "y": pv,
-                "label": labels_list[i], "color": colors_line[i],
-            })
+            lines_info.append(
+                {
+                    "x": valid_epochs,
+                    "y": pv,
+                    "label": labels_list[i],
+                    "color": colors_line[i],
+                }
+            )
         _add_line_labels(ax, lines_info, fontsize=8)
         ax.set_xscale("log")
         ax.grid(True, alpha=0.3)

@@ -172,9 +172,7 @@ def regenerate_plots(run_dir, device="cpu"):
 
     train_loss_hist = np.load(run_dir / "train_loss_history.npy").tolist()
     template = np.load(run_dir / "template.npy")
-    param_hist = torch.load(
-        run_dir / "param_history.pt", map_location=device, weights_only=False
-    )
+    param_hist = torch.load(run_dir / "param_history.pt", map_location=device, weights_only=False)
 
     psi_path = run_dir / "param_save_indices.npy"
     if psi_path.exists():
@@ -214,12 +212,15 @@ def regenerate_plots(run_dir, device="cpu"):
     elif group_name in ("dihedral", "octahedral", "A5"):
         if group_name == "dihedral":
             from escnn.group import DihedralGroup
+
             group = DihedralGroup(N=config["data"].get("group_n", 3))
         elif group_name == "octahedral":
             from escnn.group import Octahedral
+
             group = Octahedral()
         else:
             from escnn.group import Icosahedral
+
             group = Icosahedral()
         produce_plots_group(
             run_dir=run_dir,
@@ -1674,13 +1675,17 @@ def make_combined_plot(groups=None):
 
         rd_regen = _find_latest_run_with("param_history.pt", g, min_epochs=target_epochs)
         if rd_regen is not None:
-            plan.append({"group": g, "action": "regenerate", "run_dir": rd_regen, "est_sec": REGEN_SECONDS})
+            plan.append(
+                {"group": g, "action": "regenerate", "run_dir": rd_regen, "est_sec": REGEN_SECONDS}
+            )
             continue
 
         est = _estimate_training_time(g, target_epochs)
         if est is None:
             est = target_epochs * 0.05
-        plan.append({"group": g, "action": "train", "run_dir": None, "est_sec": est + REGEN_SECONDS})
+        plan.append(
+            {"group": g, "action": "train", "run_dir": None, "est_sec": est + REGEN_SECONDS}
+        )
 
     # --- Print plan ---
     total_est = sum(p["est_sec"] for p in plan) + PLOT_SECONDS
