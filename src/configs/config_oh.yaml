@@ -28,7 +28,7 @@ model:
 
 training:
   mode: offline               # Training mode: 'online' (fresh samples) | 'offline' (fixed dataset)
-  epochs: 5000                # Number of training epochs (offline mode)
+  epochs: 10000                # Number of training epochs (offline mode)
   num_steps: 100              # Number of training steps (online mode)
   optimizer: per_neuron       # Optimizer: 'adam' | 'hybrid' | 'per_neuron'
   learning_rate: 0.02         # Base learning rate
