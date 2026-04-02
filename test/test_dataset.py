@@ -8,7 +8,7 @@ import src.dataset as dataset
 
 
 class TestGroupCompositionDatasetOfflineCn:
-    """Tests for group_composition_dataset with group_name='cn' (offline)."""
+    """Tests for GroupCompositionDataset with group_name='cn' (offline)."""
 
     def test_sampled_shapes(self):
         group_size = 7
@@ -16,7 +16,7 @@ class TestGroupCompositionDatasetOfflineCn:
         k = 3
         num_samples = 100
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "cn",
             group_size=group_size,
             template=template,
@@ -35,7 +35,7 @@ class TestGroupCompositionDatasetOfflineCn:
         template = np.random.randn(group_size).astype(np.float32)
         k = 2
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "cn",
             group_size=group_size,
             template=template,
@@ -55,7 +55,7 @@ class TestGroupCompositionDatasetOfflineCn:
         k = 4
         num_samples = 50
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "cn",
             group_size=group_size,
             template=template,
@@ -75,7 +75,7 @@ class TestGroupCompositionDatasetOfflineCn:
         template = np.random.randn(group_size).astype(np.float32)
         k = 2
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "cn",
             group_size=group_size,
             template=template,
@@ -92,7 +92,7 @@ class TestGroupCompositionDatasetOfflineCn:
         template = np.random.randn(group_size).astype(np.float32)
         k = 2
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "cn",
             group_size=group_size,
             template=template,
@@ -108,7 +108,7 @@ class TestGroupCompositionDatasetOfflineCn:
 
 
 class TestGroupCompositionDatasetOfflineCnxcn:
-    """Tests for group_composition_dataset with group_name='cnxcn' (offline)."""
+    """Tests for GroupCompositionDataset with group_name='cnxcn' (offline)."""
 
     def test_sampled_shapes(self):
         p1, p2 = 5, 5
@@ -116,7 +116,7 @@ class TestGroupCompositionDatasetOfflineCnxcn:
         k = 3
         num_samples = 100
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "cnxcn",
             p1=p1,
             p2=p2,
@@ -137,7 +137,7 @@ class TestGroupCompositionDatasetOfflineCnxcn:
         template = np.random.randn(p1, p2).astype(np.float32)
         k = 2
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "cnxcn",
             p1=p1,
             p2=p2,
@@ -155,7 +155,7 @@ class TestGroupCompositionDatasetOfflineCnxcn:
 
 
 class TestGroupCompositionDatasetOfflineGroup:
-    """Tests for group_composition_dataset with generic escnn groups (offline)."""
+    """Tests for GroupCompositionDataset with generic escnn groups (offline)."""
 
     @pytest.fixture
     def d3_group(self):
@@ -173,7 +173,7 @@ class TestGroupCompositionDatasetOfflineGroup:
         num_samples = 100
         group_size = len(template_d3)
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "dihedral",
             template=template_d3,
             k=k,
@@ -191,7 +191,7 @@ class TestGroupCompositionDatasetOfflineGroup:
         k = 2
         group_size = len(template_d3)
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "dihedral",
             template=template_d3,
             k=k,
@@ -210,7 +210,7 @@ class TestGroupCompositionDatasetOfflineGroup:
         num_samples = 50
         group_size = len(template_d3)
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "dihedral",
             template=template_d3,
             k=k,
@@ -230,7 +230,7 @@ class TestGroupCompositionDatasetOfflineGroup:
         template = np.random.randn(wrong_size).astype(np.float32)
 
         with pytest.raises(AssertionError):
-            dataset.group_composition_dataset(
+            dataset.GroupCompositionDataset(
                 "dihedral",
                 template=template,
                 k=2,
@@ -239,7 +239,7 @@ class TestGroupCompositionDatasetOfflineGroup:
             )
 
     def test_getitem(self, template_d3, d3_group):
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "dihedral",
             template=template_d3,
             k=2,
@@ -255,7 +255,7 @@ class TestGroupCompositionDatasetOfflineGroup:
 
 
 class TestGroupCompositionDatasetOnline:
-    """Tests for group_composition_dataset with online=True."""
+    """Tests for GroupCompositionDataset with online=True."""
 
     def test_online_cn_shapes(self):
         group_size = 7
@@ -263,7 +263,7 @@ class TestGroupCompositionDatasetOnline:
         batch_size = 16
         template = np.random.randn(group_size).astype(np.float32)
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "cn",
             online=True,
             group_size=group_size,
@@ -283,7 +283,7 @@ class TestGroupCompositionDatasetOnline:
         batch_size = 16
         template = np.random.randn(group_size).astype(np.float32)
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "cn",
             online=True,
             group_size=group_size,
@@ -304,7 +304,7 @@ class TestGroupCompositionDatasetOnline:
         batch_size = 16
         template = np.random.randn(p1, p2).astype(np.float32)
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "cnxcn",
             online=True,
             p1=p1,
@@ -326,7 +326,7 @@ class TestGroupCompositionDatasetOnline:
         batch_size = 16
         template = np.random.randn(p1, p2).astype(np.float32)
 
-        ds = dataset.group_composition_dataset(
+        ds = dataset.GroupCompositionDataset(
             "cnxcn",
             online=True,
             p1=p1,
@@ -345,7 +345,7 @@ class TestGroupCompositionDatasetOnline:
 
     def test_online_unsupported_group_raises(self):
         with pytest.raises(ValueError, match="Online mode only supported"):
-            dataset.group_composition_dataset(
+            dataset.GroupCompositionDataset(
                 "dihedral",
                 online=True,
                 template=np.zeros(6),

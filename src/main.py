@@ -314,7 +314,7 @@ def produce_plots_cnxcn(
     print("Generating evaluation data for visualization...")
     model_type = config["model"]["model_type"]
 
-    eval_ds_2d = dataset.group_composition_dataset(
+    eval_ds_2d = dataset.GroupCompositionDataset(
         "cnxcn",
         p1=config["data"]["p1"],
         p2=config["data"]["p2"],
@@ -609,7 +609,7 @@ def produce_plots_cn(
     print("Generating evaluation data for visualization...")
 
     if use_group_style:
-        eval_ds = dataset.group_composition_dataset(
+        eval_ds = dataset.GroupCompositionDataset(
             "cn",
             group_size=config["data"]["p"],
             template=template_1d,
@@ -620,7 +620,7 @@ def produce_plots_cn(
         Y_eval_t = eval_ds.Y.to(device)
         print(f"  Generated {len(eval_ds)} samples for visualization")
     else:
-        eval_ds_1d = dataset.group_composition_dataset(
+        eval_ds_1d = dataset.GroupCompositionDataset(
             "cn",
             group_size=config["data"]["p"],
             template=template_1d,
@@ -881,7 +881,7 @@ def produce_plots_group(
     ### ----- GENERATE EVALUATION DATA ----- ###
     print("\nGenerating evaluation data for visualization...")
 
-    eval_ds = dataset.group_composition_dataset(
+    eval_ds = dataset.GroupCompositionDataset(
         group_name,
         template=template,
         k=k,
@@ -1286,8 +1286,8 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
                 p1=config["data"]["p1"], p2=config["data"]["p2"], template=template_2d
             )
 
-        train_dataset = dataset.group_composition_dataset(group_name, online=True, **online_kwargs)
-        val_dataset = dataset.group_composition_dataset(group_name, online=True, **online_kwargs)
+        train_dataset = dataset.GroupCompositionDataset(group_name, online=True, **online_kwargs)
+        val_dataset = dataset.GroupCompositionDataset(group_name, online=True, **online_kwargs)
 
         train_loader = DataLoader(train_dataset, batch_size=None, num_workers=0)
         val_loader = DataLoader(val_dataset, batch_size=None, num_workers=0)
@@ -1312,11 +1312,11 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
         elif group_name in ("dihedral", "octahedral", "A5"):
             ds_kwargs.update(template=tpl, group=group)
 
-        train_ds = dataset.group_composition_dataset(group_name, **ds_kwargs)
+        train_ds = dataset.GroupCompositionDataset(group_name, **ds_kwargs)
 
         val_samples = max(1000, config["data"]["num_samples"] // 10)
         val_kwargs = {**ds_kwargs, "mode": "sampled", "num_samples": val_samples}
-        val_ds = dataset.group_composition_dataset(group_name, **val_kwargs)
+        val_ds = dataset.GroupCompositionDataset(group_name, **val_kwargs)
 
         X_train_t = train_ds.X.to(device)
         Y_train_t = train_ds.Y.to(device)

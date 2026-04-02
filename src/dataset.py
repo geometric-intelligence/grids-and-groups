@@ -3,11 +3,11 @@ import torch
 from torch.utils.data import Dataset, IterableDataset
 
 
-def group_composition_dataset(group_name, *, online=False, **kwargs):
+class GroupCompositionDataset(Dataset):
     """Single entry point for all group composition datasets.
 
-    For offline mode (default): returns a :class:`GroupCompositionDataset`
-    (map-style Dataset storing pre-generated input-output pairs).
+    For offline mode (default): a map-style Dataset storing pre-generated
+    input-output pairs.
 
     For online mode: returns an IterableDataset that generates batches
     on-the-fly.  Only supported for ``group_name`` in ``('cn', 'cnxcn')``.
@@ -26,31 +26,9 @@ def group_composition_dataset(group_name, *, online=False, **kwargs):
         - cnxcn: ``p1, p2, template, k, mode, num_samples, return_all_outputs``
         - generic groups: ``template, k, group, mode, num_samples, return_all_outputs``
         - online adds: ``batch_size, device``
-    """
-    if online:
-        if group_name not in ("cn", "cnxcn"):
-            raise ValueError(f"Online mode only supported for 'cn' and 'cnxcn', got '{group_name}'")
-        if group_name == "cn":
-            return _OnlineModularAdditionDataset1D(**kwargs)
-        return _OnlineModularAdditionDataset2D(**kwargs)
 
-    if group_name == "cn":
-        X, Y, sequence = _build_cn(**kwargs)
-    elif group_name == "cnxcn":
-        X, Y, sequence = _build_cnxcn(**kwargs)
-    else:
-        X, Y, sequence = _build_group(**kwargs)
-    return GroupCompositionDataset(X, Y, sequence)
-
-
-class GroupCompositionDataset(Dataset):
-    """Map-style dataset storing pre-generated group composition pairs.
-
-    Use the module-level factory function :func:`group_composition_dataset`
-    to construct instances for specific groups.
-
-    Attributes
-    ----------
+    Attributes (offline only)
+    -------------------------
     X : torch.Tensor
         Input data, shape ``(N, k, group_size)``.
     Y : torch.Tensor
@@ -60,8 +38,27 @@ class GroupCompositionDataset(Dataset):
         Integer element indices / shifts used to build each sample.
     """
 
-    def __init__(self, X, Y, sequence=None):
+    def __new__(cls, group_name, *, online=False, **kwargs):
+        if online:
+            if group_name not in ("cn", "cnxcn"):
+                raise ValueError(
+                    f"Online mode only supported for 'cn' and 'cnxcn', got '{group_name}'"
+                )
+            if group_name == "cn":
+                return _OnlineModularAdditionDataset1D(**kwargs)
+            return _OnlineModularAdditionDataset2D(**kwargs)
+        return super().__new__(cls)
+
+    def __init__(self, group_name, *, online=False, **kwargs):
+        if online:
+            return
         super().__init__()
+        if group_name == "cn":
+            X, Y, sequence = self._build_cn(**kwargs)
+        elif group_name == "cnxcn":
+            X, Y, sequence = self._build_cnxcn(**kwargs)
+        else:
+            X, Y, sequence = self._build_group(**kwargs)
         self.X = torch.tensor(np.asarray(X), dtype=torch.float32)
         self.Y = torch.tensor(np.asarray(Y), dtype=torch.float32)
         self.sequence = sequence
@@ -72,159 +69,158 @@ class GroupCompositionDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.Y[idx]
 
+    # ------------------------------------------------------------------
+    # Offline build methods
+    # ------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Offline build helpers
-# ---------------------------------------------------------------------------
+    @staticmethod
+    def _build_cn(
+        group_size,
+        template,
+        k,
+        mode="sampled",
+        num_samples=65536,
+        return_all_outputs=False,
+    ):
+        """Build dataset arrays for cyclic group C_{group_size} via 1D np.roll."""
+        assert template.shape == (group_size,), (
+            f"template must be ({group_size},), got {template.shape}"
+        )
 
+        if mode == "exhaustive":
+            total = group_size**k
+            if total > 1_000_000:
+                raise ValueError(f"group_size^k = {total} is huge; use mode='sampled' instead.")
+            N = total
+            sequence = np.zeros((N, k), dtype=np.int64)
+            for idx in range(N):
+                for t in range(k):
+                    sequence[idx, t] = (idx // (group_size**t)) % group_size
+        else:
+            N = int(num_samples)
+            sequence = np.random.randint(0, group_size, size=(N, k), dtype=np.int64)
 
-def _build_cn(
-    group_size,
-    template,
-    k,
-    mode="sampled",
-    num_samples=65536,
-    return_all_outputs=False,
-):
-    """Build dataset arrays for cyclic group C_{group_size} via 1D np.roll."""
-    assert template.shape == (group_size,), (
-        f"template must be ({group_size},), got {template.shape}"
-    )
+        X = np.zeros((N, k, group_size), dtype=np.float32)
+        Y = np.zeros((N, k, group_size), dtype=np.float32)
 
-    if mode == "exhaustive":
-        total = group_size**k
-        if total > 1_000_000:
-            raise ValueError(f"group_size^k = {total} is huge; use mode='sampled' instead.")
-        N = total
-        sequence = np.zeros((N, k), dtype=np.int64)
-        for idx in range(N):
+        for i in range(N):
+            cumsum = 0
             for t in range(k):
-                sequence[idx, t] = (idx // (group_size**t)) % group_size
-    else:
-        N = int(num_samples)
-        sequence = np.random.randint(0, group_size, size=(N, k), dtype=np.int64)
+                shift = int(sequence[i, t])
+                X[i, t, :] = np.roll(template, shift)
+                cumsum = (cumsum + shift) % group_size
+                Y[i, t, :] = np.roll(template, cumsum)
 
-    X = np.zeros((N, k, group_size), dtype=np.float32)
-    Y = np.zeros((N, k, group_size), dtype=np.float32)
+        if not return_all_outputs:
+            Y = Y[:, -1, :]
+        else:
+            Y = Y[:, 1:, :]
 
-    for i in range(N):
-        cumsum = 0
-        for t in range(k):
-            shift = int(sequence[i, t])
-            X[i, t, :] = np.roll(template, shift)
-            cumsum = (cumsum + shift) % group_size
-            Y[i, t, :] = np.roll(template, cumsum)
+        return X, Y, sequence
 
-    if not return_all_outputs:
-        Y = Y[:, -1, :]
-    else:
-        Y = Y[:, 1:, :]
+    @staticmethod
+    def _build_cnxcn(
+        p1,
+        p2,
+        template,
+        k,
+        mode="sampled",
+        num_samples=65536,
+        return_all_outputs=False,
+    ):
+        r"""Build dataset arrays for product group C_{p1} \times C_{p2} via 2D np.roll."""
+        assert template.shape == (p1, p2), f"template must be ({p1}, {p2}), got {template.shape}"
+        group_size = p1 * p2
 
-    return X, Y, sequence
+        if mode == "exhaustive":
+            total = group_size**k
+            if total > 1_000_000:
+                raise ValueError(f"(p1*p2)^k = {total} is huge; use mode='sampled' instead.")
+            N = total
+            sequence_xy = np.zeros((N, k, 2), dtype=np.int64)
+            for idx in range(N):
+                for t in range(k):
+                    flat_idx = (idx // (group_size**t)) % group_size
+                    sequence_xy[idx, t, 0] = flat_idx // p2
+                    sequence_xy[idx, t, 1] = flat_idx % p2
+        else:
+            N = int(num_samples)
+            sequence_xy = np.empty((N, k, 2), dtype=np.int64)
+            sequence_xy[:, :, 0] = np.random.randint(0, p1, size=(N, k))
+            sequence_xy[:, :, 1] = np.random.randint(0, p2, size=(N, k))
 
+        X = np.zeros((N, k, group_size), dtype=np.float32)
+        Y = np.zeros((N, k, group_size), dtype=np.float32)
 
-def _build_cnxcn(
-    p1,
-    p2,
-    template,
-    k,
-    mode="sampled",
-    num_samples=65536,
-    return_all_outputs=False,
-):
-    r"""Build dataset arrays for product group C_{p1} \times C_{p2} via 2D np.roll."""
-    assert template.shape == (p1, p2), f"template must be ({p1}, {p2}), got {template.shape}"
-    group_size = p1 * p2
-
-    if mode == "exhaustive":
-        total = group_size**k
-        if total > 1_000_000:
-            raise ValueError(f"(p1*p2)^k = {total} is huge; use mode='sampled' instead.")
-        N = total
-        sequence_xy = np.zeros((N, k, 2), dtype=np.int64)
-        for idx in range(N):
+        for i in range(N):
+            sx, sy = 0, 0
             for t in range(k):
-                flat_idx = (idx // (group_size**t)) % group_size
-                sequence_xy[idx, t, 0] = flat_idx // p2
-                sequence_xy[idx, t, 1] = flat_idx % p2
-    else:
-        N = int(num_samples)
-        sequence_xy = np.empty((N, k, 2), dtype=np.int64)
-        sequence_xy[:, :, 0] = np.random.randint(0, p1, size=(N, k))
-        sequence_xy[:, :, 1] = np.random.randint(0, p2, size=(N, k))
+                ax = int(sequence_xy[i, t, 0])
+                ay = int(sequence_xy[i, t, 1])
+                rolled = np.roll(np.roll(template, shift=ax, axis=0), shift=ay, axis=1)
+                X[i, t, :] = rolled.ravel()
+                sx = (sx + ax) % p1
+                sy = (sy + ay) % p2
+                Y[i, t, :] = np.roll(np.roll(template, shift=sx, axis=0), shift=sy, axis=1).ravel()
 
-    X = np.zeros((N, k, group_size), dtype=np.float32)
-    Y = np.zeros((N, k, group_size), dtype=np.float32)
+        if not return_all_outputs:
+            Y = Y[:, -1, :]
 
-    for i in range(N):
-        sx, sy = 0, 0
-        for t in range(k):
-            ax = int(sequence_xy[i, t, 0])
-            ay = int(sequence_xy[i, t, 1])
-            rolled = np.roll(np.roll(template, shift=ax, axis=0), shift=ay, axis=1)
-            X[i, t, :] = rolled.ravel()
-            sx = (sx + ax) % p1
-            sy = (sy + ay) % p2
-            Y[i, t, :] = np.roll(np.roll(template, shift=sx, axis=0), shift=sy, axis=1).ravel()
+        return X, Y, sequence_xy
 
-    if not return_all_outputs:
-        Y = Y[:, -1, :]
+    @staticmethod
+    def _build_group(
+        template,
+        k,
+        group,
+        mode="sampled",
+        num_samples=65536,
+        return_all_outputs=False,
+    ):
+        """Build dataset arrays for any escnn group with a regular representation."""
+        group_size = group.order()
 
-    return X, Y, sequence_xy
+        assert template.shape == (group_size,), (
+            f"template must be ({group_size},), got {template.shape}"
+        )
 
+        regular_rep = group.representations["regular"]
+        elements = list(group.elements)
+        n_elements = len(elements)
 
-def _build_group(
-    template,
-    k,
-    group,
-    mode="sampled",
-    num_samples=65536,
-    return_all_outputs=False,
-):
-    """Build dataset arrays for any escnn group with a regular representation."""
-    group_size = group.order()
+        rep_matrices = np.array([regular_rep(g) for g in elements])
 
-    assert template.shape == (group_size,), (
-        f"template must be ({group_size},), got {template.shape}"
-    )
+        if mode == "exhaustive":
+            total = n_elements**k
+            if total > 1_000_000:
+                raise ValueError(f"n_elements^k = {total} is huge; use mode='sampled' instead.")
+            N = total
+            sequence = np.zeros((N, k), dtype=np.int64)
+            for idx in range(N):
+                for t in range(k):
+                    sequence[idx, t] = (idx // (n_elements**t)) % n_elements
+        else:
+            N = int(num_samples)
+            sequence = np.random.randint(0, n_elements, size=(N, k), dtype=np.int64)
 
-    regular_rep = group.representations["regular"]
-    elements = list(group.elements)
-    n_elements = len(elements)
+        X = np.zeros((N, k, group_size), dtype=np.float32)
+        Y = np.zeros((N, k, group_size), dtype=np.float32)
 
-    rep_matrices = np.array([regular_rep(g) for g in elements])
-
-    if mode == "exhaustive":
-        total = n_elements**k
-        if total > 1_000_000:
-            raise ValueError(f"n_elements^k = {total} is huge; use mode='sampled' instead.")
-        N = total
-        sequence = np.zeros((N, k), dtype=np.int64)
-        for idx in range(N):
+        for i in range(N):
+            cumulative_rep = np.eye(group_size)
             for t in range(k):
-                sequence[idx, t] = (idx // (n_elements**t)) % n_elements
-    else:
-        N = int(num_samples)
-        sequence = np.random.randint(0, n_elements, size=(N, k), dtype=np.int64)
+                elem_idx = sequence[i, t]
+                g_rep = rep_matrices[elem_idx]
+                X[i, t, :] = g_rep @ template
+                cumulative_rep = g_rep @ cumulative_rep
+                Y[i, t, :] = cumulative_rep @ template
 
-    X = np.zeros((N, k, group_size), dtype=np.float32)
-    Y = np.zeros((N, k, group_size), dtype=np.float32)
+        if not return_all_outputs:
+            Y = Y[:, -1, :]
+        else:
+            Y = Y[:, 1:, :]
 
-    for i in range(N):
-        cumulative_rep = np.eye(group_size)
-        for t in range(k):
-            elem_idx = sequence[i, t]
-            g_rep = rep_matrices[elem_idx]
-            X[i, t, :] = g_rep @ template
-            cumulative_rep = g_rep @ cumulative_rep
-            Y[i, t, :] = cumulative_rep @ template
-
-    if not return_all_outputs:
-        Y = Y[:, -1, :]
-    else:
-        Y = Y[:, 1:, :]
-
-    return X, Y, sequence
+        return X, Y, sequence
 
 
 # ---------------------------------------------------------------------------
