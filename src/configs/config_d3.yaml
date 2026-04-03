@@ -41,6 +41,7 @@ training:
   verbose_interval: 100       # Print loss every N epochs/steps
   save_param_interval: 1      # Save parameter snapshot every N epochs/steps
   reduction_threshold: null   # Early stopping: stop at this loss-reduction fraction (null = disabled)
+  resume_from: null            # Run dir → checkpoints/final_model.pt, or path to .pt state_dict; optimizer starts fresh
 
 device: cuda:0                # Device: 'cuda:N' | 'cpu'
 

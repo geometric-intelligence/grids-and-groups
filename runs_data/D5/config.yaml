@@ -16,15 +16,15 @@ data:
   num_samples: 1000
   powers:
   - 0.0
-  - 600.0
-  - 200.0
-  - 20.0
+  - 3000.0
+  - 2000.0
+  - 1000.0
   seed: 10
   template_type: custom_fourier
 device: cuda:1
 model:
   hidden_dim: 200
-  init_scale: 1.0e-07
+  init_scale: 1.0e-06
   model_type: TwoLayerNet
   nonlinearity: square
   output_scale: 1.0
@@ -35,13 +35,14 @@ training:
   - 0.9
   - 0.999
   degree: null
-  epochs: 100000
+  epochs: 1000000
   grad_clip: 0.1
-  learning_rate: 0.002
+  learning_rate: 1.0e-05
   mode: offline
   num_steps: 100
   optimizer: per_neuron
   reduction_threshold: null
+  resume_from: null
   save_param_interval: 1
   scaling_factor: -3
   verbose_interval: 400

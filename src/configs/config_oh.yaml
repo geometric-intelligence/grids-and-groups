@@ -20,7 +20,7 @@ data:
 model:
   model_type: TwoLayerNet     # Model architecture: 'QuadraticRNN' | 'SequentialMLP' | 'TwoLayerNet'
   hidden_dim: 300             # Hidden layer width
-  init_scale: 0.001           # Weight initialization scale
+  init_scale: 0.00001           # Weight initialization scale
   nonlinearity: square        # Activation function (TwoLayerNet only): 'square' | ...
   output_scale: 1.0           # Output layer scaling factor (TwoLayerNet only)
   return_all_outputs: false   # true = seq-to-seq, false = seq-to-one (final output only)
@@ -28,10 +28,10 @@ model:
 
 training:
   mode: offline               # Training mode: 'online' (fresh samples) | 'offline' (fixed dataset)
-  epochs: 10000                # Number of training epochs (offline mode)
+  epochs: 1000000 #1000000                # Number of training epochs (offline mode)
   num_steps: 100              # Number of training steps (online mode)
   optimizer: per_neuron       # Optimizer: 'adam' | 'hybrid' | 'per_neuron'
-  learning_rate: 0.02         # Base learning rate
+  learning_rate: 0.001         # Base learning rate
   betas: [0.9, 0.999]        # Adam/hybrid beta parameters
   weight_decay: 0.0           # L2 regularization strength
   degree: null                # Homogeneity degree for 'per_neuron' (null = auto-infer)
@@ -41,6 +41,7 @@ training:
   save_param_interval: 10     # Save parameter snapshot every N epochs/steps
   dense_save_until: 10        # Save every epoch until this epoch (for early-training detail)
   reduction_threshold: null   # Early stopping: stop at this loss-reduction fraction (null = disabled)
+  resume_from: null # runs/20260328_140434            # Run dir → checkpoints/final_model.pt, or path to .pt state_dict; optimizer starts fresh
 
 device: cuda:0                # Device: 'cuda:N' | 'cpu'
 

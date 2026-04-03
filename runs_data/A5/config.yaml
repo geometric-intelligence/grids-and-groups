@@ -19,7 +19,7 @@ data:
 device: cuda:0
 model:
   hidden_dim: 400
-  init_scale: 0.001
+  init_scale: 1.0e-05
   model_type: TwoLayerNet
   nonlinearity: square
   output_scale: 1.0
@@ -31,13 +31,14 @@ training:
   - 0.999
   degree: null
   dense_save_until: 10
-  epochs: 100000
+  epochs: 1000000
   grad_clip: 0.1
-  learning_rate: 0.02
+  learning_rate: 0.001
   mode: offline
   num_steps: 100
   optimizer: per_neuron
   reduction_threshold: null
+  resume_from: null
   save_param_interval: 10
   scaling_factor: -3
   verbose_interval: 200
