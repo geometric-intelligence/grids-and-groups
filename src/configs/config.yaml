@@ -104,8 +104,9 @@ training:
   # Training Dynamics
   grad_clip: 0.1
   verbose_interval: 1000
-  save_param_interval: null      # Save params every N steps/epochs
-                              # Set to null to only save initial & final (memory efficient for sweeps)
+  save_param_interval: null      # Save params every N steps/epochs (ignored if save_param_snapshots=false)
+                              # Set to null to only save initial & final when snapshots are enabled
+  save_param_snapshots: false   # If false: no param_history.pt; less RAM/disk (final weights still in checkpoints/)
 
   # Early Stopping (optional)
   # -------------------------
@@ -113,6 +114,10 @@ training:
   # Set to null to disable (train for full num_steps/epochs).
   reduction_threshold: null   # e.g., 0.99 = stop when 99% loss reduction achieved
                               # null = disabled (train for full steps/epochs)
+
+  # Resume model weights only (not optimizer). Run directory loads checkpoints/final_model.pt;
+  # or set to a path ending in .pt (torch.save(model.state_dict(), ...)).
+  resume_from: null
 
 # Device
 # ------

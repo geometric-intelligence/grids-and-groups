@@ -12,24 +12,24 @@ data:
   seed: 10                    # Random seed for reproducibility
   template_type: custom_fourier  # Template type: 'mnist' | 'custom_fourier'
   # Desired power per 2D Fourier mode (modes: (1,0), (0,1), (1,1), (2,0), (0,2))
-  powers: [200.0, 100.0, 50.0, 10.0, 5.0]
+  powers: [0, 12, 10, 8, 6, 4] #[200.0, 100.0, 50.0, 10.0, 5.0]
   mode: exhaustive            # Dataset mode: 'sampled' | 'exhaustive'
   num_samples: 1000           # Number of samples (used when mode='sampled')
 
 model:
   model_type: TwoLayerMLP     # Model architecture: 'QuadraticRNN' | 'TwoLayerMLP'
   hidden_dim: 300             # Hidden layer width (hidden_factor=20 * group_size=25)
-  init_scale: 0.0001          # Weight initialization scale
-  nonlinearity: square        # Activation: 'square' | 'power' | 'relu' | 'tanh' | 'gelu' | 'linear'
-  output_scale: 1.0           # Output layer scaling factor
+  init_scale: 0.00001          # Weight initialization scale
+  nonlinearity: square        # Activation function (TwoLayerNet only): 'square' | ...
+  output_scale: 1.0           # Output layer scaling factor (TwoLayerNet only)
   return_all_outputs: false   # true = seq-to-seq, false = seq-to-one (final output only)
 
 training:
   mode: offline               # Training mode: 'online' (fresh samples) | 'offline' (fixed dataset)
-  epochs: 100000               # Number of training epochs (offline mode)
+  epochs: 100000             # Number of training epochs (offline mode)
   num_steps: 100              # Number of training steps (online mode)
   optimizer: per_neuron       # Optimizer: 'adam' | 'hybrid' | 'per_neuron'
-  learning_rate: 0.005        # Base learning rate
+  learning_rate: 0.01        # Base learning rate
   betas: [0.9, 0.999]        # Adam/hybrid beta parameters
   weight_decay: 0.0           # L2 regularization strength
   degree: null                # Homogeneity degree for 'per_neuron' (null = defaults to model.k)
@@ -38,6 +38,7 @@ training:
   verbose_interval: 400       # Print loss every N epochs/steps
   save_param_interval: 1      # Save parameter snapshot every N epochs/steps
   reduction_threshold: null   # Early stopping: stop at this loss-reduction fraction (null = disabled)
+  resume_from: null            # Run dir → checkpoints/final_model.pt, or path to .pt state_dict; optimizer starts fresh
 
 device: cuda:0                # Device: 'cuda:N' | 'cpu'
 

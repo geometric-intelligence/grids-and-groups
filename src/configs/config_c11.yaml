@@ -14,14 +14,14 @@ data:
   num_samples: 1000           # Number of samples (used when mode='sampled')
 
   # custom_fourier powers (one per frequency mode 0..5)
-  powers: [0.0, 200.0, 100.0, 50.0, 20.0, 5.]
+  powers: [0, 12.5, 10, 7.5, 5, 2.5] #[0.0, 200.0, 100.0, 50.0, 20.0, 5.]
 
 model:
-  model_type: TwoLayerMLP     # Model architecture: 'QuadraticRNN' | 'TwoLayerMLP'
-  hidden_dim: 100             # Hidden layer width
-  init_scale: 0.001           # Weight initialization scale
-  nonlinearity: square        # Activation: 'square' | 'power' | 'relu' | 'tanh' | 'gelu' | 'linear'
-  output_scale: 1.0           # Output layer scaling factor
+  model_type: TwoLayerNet     # Model architecture: 'QuadraticRNN' | 'SequentialMLP' | 'TwoLayerNet'
+  hidden_dim: 200             # Hidden layer width
+  init_scale: 0.00001           # Weight initialization scale
+  nonlinearity: square        # Activation function (TwoLayerNet only): 'square' | ...
+  output_scale: 1.0           # Output layer scaling factor (TwoLayerNet only)
   return_all_outputs: false   # true = seq-to-seq, false = seq-to-one (final output only)
 
 training:
@@ -29,7 +29,7 @@ training:
   epochs: 100000               # Number of training epochs (offline mode)
   num_steps: 100              # Number of training steps (online mode)
   optimizer: per_neuron       # Optimizer: 'adam' | 'hybrid' | 'per_neuron'
-  learning_rate: 0.02         # Base learning rate
+  learning_rate: 0.01         # Base learning rate
   betas: [0.9, 0.999]        # Adam/hybrid beta parameters
   weight_decay: 0.0           # L2 regularization strength
   degree: null                # Homogeneity degree for 'per_neuron' (null = defaults to model.k)
@@ -39,6 +39,7 @@ training:
   save_param_interval: 1      # Save parameter snapshot every N epochs/steps
   dense_save_until: 10        # Save every epoch until this epoch (for early-training detail)
   reduction_threshold: null   # Early stopping: stop at this loss-reduction fraction (null = disabled)
+  resume_from: null            # Run dir → checkpoints/final_model.pt, or path to .pt state_dict; optimizer starts fresh
 
 device: cuda:0                # Device: 'cuda:N' | 'cpu'
 

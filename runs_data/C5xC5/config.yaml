@@ -11,17 +11,18 @@ data:
   p1: 5
   p2: 5
   powers:
-  - 200.0
-  - 100.0
-  - 50.0
-  - 10.0
-  - 5.0
+  - 0
+  - 12
+  - 10
+  - 8
+  - 6
+  - 4
   seed: 10
   template_type: custom_fourier
 device: cuda:0
 model:
   hidden_dim: 300
-  init_scale: 0.0001
+  init_scale: 1.0e-05
   model_type: TwoLayerNet
   nonlinearity: square
   output_scale: 1.0
@@ -34,11 +35,12 @@ training:
   degree: null
   epochs: 100000
   grad_clip: 0.1
-  learning_rate: 0.005
+  learning_rate: 0.01
   mode: offline
   num_steps: 100
   optimizer: per_neuron
   reduction_threshold: null
+  resume_from: null
   save_param_interval: 1
   scaling_factor: -3
   verbose_interval: 400

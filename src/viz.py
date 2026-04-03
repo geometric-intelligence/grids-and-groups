@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import MaxNLocator
@@ -104,17 +105,81 @@ def _permutation_from_groups_with_dead(
 
 
 def _training_loss_log_y_floor(ax):
-    """After setting training loss to log-y, match main.py and floor the axis at 1.0."""
-    ax.set_ylim(bottom=1e-1)
+    """Set log-scale training-loss y-axis lower limit (fixed in code; tweak here as needed)."""
+    ax.set_ylim(bottom=10e-2)
 
 
-def _add_line_labels(ax, lines_info, fontsize=12):
+def _theory_loss_y_levels_from_run(run_dir: Path, cfg: dict) -> list[float] | None:
+    """Template MSE plateau levels via :class:`~src.power.CyclicPower` / :class:`~src.power.GroupPower`.
+
+    Uses ``loss_plateau_predictions()`` only (no duplicate alpha arithmetic here).
+    """
+    import src.power as power
+
+    tpl_path = run_dir / "template.npy"
+    if not tpl_path.exists():
+        return None
+
+    template_np = np.load(tpl_path)
+    gn = cfg["data"]["group_name"]
+
+    if gn == "cn":
+        t_flat = np.asarray(template_np).ravel()
+        cp = power.CyclicPower(t_flat, template_dim=1)
+        out = cp.loss_plateau_predictions(verbose=False)
+    elif gn == "cnxcn":
+        p1, p2 = cfg["data"]["p1"], cfg["data"]["p2"]
+        t_flat = np.asarray(template_np).ravel()
+        cp = power.CyclicPower(t_flat, template_dim=2, p1=p1, p2=p2)
+        out = cp.loss_plateau_predictions(verbose=False)
+    elif gn in ("dihedral", "octahedral", "A5"):
+        if gn == "dihedral":
+            from escnn.group import DihedralGroup
+
+            group = DihedralGroup(N=cfg["data"].get("group_n", 3))
+        elif gn == "octahedral":
+            from escnn.group import Octahedral
+
+            group = Octahedral()
+        else:
+            from escnn.group import Icosahedral
+
+            group = Icosahedral()
+        t = np.asarray(template_np).ravel()
+        gp = power.GroupPower(t, group)
+        out = gp.loss_plateau_predictions(verbose=False)
+    else:
+        return None
+
+    return list(out) if out else None
+
+
+def _draw_theory_loss_hlines(ax, theory_y_levels: list[float] | None) -> None:
+    """Black dashed horizontal lines at MSE plateaus (combined top row)."""
+    if not theory_y_levels:
+        return
+    for y in theory_y_levels:
+        if y > 0 and np.isfinite(y):
+            ax.axhline(
+                y=y,
+                color="black",
+                linestyle="--",
+                linewidth=1.0,
+                alpha=0.65,
+                zorder=1,
+            )
+
+
+def _add_line_labels(ax, lines_info, fontsize=12, min_frac_sep: float = 0.07):
     """Add right-aligned colored text labels above (or below) each line.
 
     Each label is anchored at the rightmost data-point of its line and
     right-aligned so the text extends leftward inside the axes box.
     When two labels would overlap vertically the lower one is placed
     below its line instead.
+
+    Args:
+        min_frac_sep: Minimum axis-fraction separation before flipping placement (larger ⇒ fewer overlaps).
     """
     if not lines_info:
         return
@@ -153,7 +218,7 @@ def _add_line_labels(ax, lines_info, fontsize=12):
 
     placements = ["above"] * len(label_data)
     for i in range(1, len(label_data)):
-        if abs(fracs[i - 1] - fracs[i]) < 0.07:
+        if abs(fracs[i - 1] - fracs[i]) < min_frac_sep:
             placements[i] = "below"
 
     # Keep labels inside the axes: flip if too close to the top/bottom edge
@@ -164,7 +229,7 @@ def _add_line_labels(ax, lines_info, fontsize=12):
             placements[i] = "above"
 
     for d, placement in zip(label_data, placements):
-        y_off = 7 if placement == "above" else -7
+        y_off = 3 if placement == "above" else -3
         va = "bottom" if placement == "above" else "top"
         ax.annotate(
             d["label"],
@@ -265,16 +330,9 @@ def plot_train_loss_with_theory(
 
     ax.plot(x_values, loss_history, lw=4, color="#1f77b4", label="Training Loss")
 
-    x_freq, y_freq, pwr = power.get_power_2d(template_2d)
-    pwr = pwr.flatten()
-    valid = pwr > 1e-20
-    pwr = pwr[valid]
-    pwr = np.sort(pwr)[::-1]
-
-    alpha_values = [np.sum(pwr[k:]) for k in range(len(pwr))]
-    coef = 1 / (p1 * p2)
-    for k, alpha in enumerate(alpha_values):
-        ax.axhline(y=coef * alpha, color="black", linestyle="--", linewidth=2, zorder=-2)
+    cp = power.CyclicPower(template_2d.ravel(), template_dim=2, p1=p1, p2=p2)
+    for y in cp.loss_plateau_predictions(verbose=False):
+        ax.axhline(y=y, color="black", linestyle="--", linewidth=2, zorder=-2)
 
     ax.set_xlabel(x_label, fontsize=24)
     ax.set_ylabel("Train Loss", fontsize=24)
@@ -1039,14 +1097,12 @@ def plot_power_1d(
 
     ax1.plot(loss_epochs, loss_history_subset, lw=4, color="#1f77b4", label="Training Loss")
 
-    pwr, _ = power.get_power_1d(template_1d)
-    power_sorted = np.sort(pwr[pwr > 1e-20])[::-1]
+    cp_theory = power.CyclicPower(np.asarray(template_1d).ravel(), template_dim=1)
+    y_levels = np.array(cp_theory.loss_plateau_predictions(verbose=False), dtype=float)
 
-    alpha_values = np.array([np.sum(power_sorted[k:]) for k in range(len(power_sorted))])
-    coef = 1.0 / group_size
-    y_levels = coef * alpha_values
-
-    n_bands = min(len(tracked_freqs), len(y_levels) - 1)
+    n_bands = (
+        max(0, min(len(tracked_freqs), len(y_levels) - 1)) if len(y_levels) else 0
+    )
     for i in range(n_bands):
         y_top = y_levels[i]
         y_bot = y_levels[i + 1]
@@ -1056,7 +1112,8 @@ def plot_power_1d(
         ax1.axhline(y=y, color="black", linestyle="--", linewidth=2, zorder=-2)
 
     ax1.set_ylabel("Theory Loss Levels", fontsize=20)
-    ax1.set_ylim(y_levels[n_bands], y_levels[0] * 1.1)
+    if len(y_levels):
+        ax1.set_ylim(y_levels[n_bands], y_levels[0] * 1.1)
     style_axes(ax1)
     ax1.grid(False)
     ax1.tick_params(labelbottom=False)
@@ -1993,23 +2050,43 @@ def plot_combined_loss_and_power(
 ):
     """Create a 3-row x N-column combined figure from multiple run directories.
 
-    Rows (same fonts/grid/line weights across panels): (1) Log-Log training loss,
-    (2) Log-X output power vs template with inline labels, (3) per-neuron fraction of
-    spectral power in the **final-dominant** mode/irrep — the same quantity as
-    :func:`plot_w_dominant_irrep_fraction`.  Mode/irrep line colors in row 3 match row 2
-    for modes that appear in the power plot (see :func:`mode_colors_aligned_with_power_plot`).
+    Rows (same fonts/grid/line weights across panels): (1) Log-Log training loss with
+    theoretical MSE plateaus from ``template.npy``, (2) Log-X output power vs template
+    with inline labels, (3) per-neuron fraction of spectral power in the **final-dominant**
+    mode/irrep.      Axes are built with ``GridSpec`` (not ``plt.subplots(sharex='col')``) so the loss and
+    power rows never share a y-axis; x-limits are matched per column after plotting.
+    Rows 0–1 show y tick labels on every column (independent scales); axis titles are on
+    the left column only. Row 3 **y** (0–1)
+    is shared across columns only. Mode/irrep line colors in row 3 match row 2 (see
+    :func:`mode_colors_aligned_with_power_plot`).
 
-    Each run directory must contain ``train_loss_history.npy``, ``power_data.npz``, and
-    ``config.yaml``. For the third row, prefer ``w_dominant_irrep_fraction.npz`` (saved during
-    training via :func:`maybe_save_w_dominant_irrep_fraction_npz`); otherwise
-    ``param_history.pt`` and ``param_save_indices.npy`` are used to recompute curves.
+    Each run directory must contain ``train_loss_history.npy``, ``power_data.npz``,
+    ``config.yaml``, and ``template.npy`` (for theory lines). For the third row, prefer
+    ``w_dominant_irrep_fraction.npz``; otherwise ``param_history.pt`` and
+    ``param_save_indices.npy`` are used to recompute curves.
     """
     import yaml
 
     n_cols = len(run_dirs)
-    fig, axes = plt.subplots(3, n_cols, figsize=(5 * n_cols, 12))
-    if n_cols == 1:
-        axes = axes.reshape(3, 1)
+    # Build axes with GridSpec so *no* y-sharing between rows (``plt.subplots(sharex='col')``
+    # can still link y-limits between stacked panels).  X alignment per column is applied
+    # manually after plotting.
+    fig = plt.figure(figsize=(5.8 * n_cols, 9.0))
+    gs = gridspec.GridSpec(
+        3,
+        n_cols,
+        figure=fig,
+        hspace=0.32,
+        wspace=0.38,
+        top=0.90,
+    )
+    axes = np.empty((3, n_cols), dtype=object)
+    for r in range(3):
+        for c in range(n_cols):
+            axes[r, c] = fig.add_subplot(gs[r, c])
+    if n_cols > 1:
+        for c in range(1, n_cols):
+            axes[2, c].sharey(axes[2, 0])
 
     for col, (rd, label) in enumerate(zip(run_dirs, group_labels)):
         rd = Path(rd)
@@ -2026,19 +2103,25 @@ def plot_combined_loss_and_power(
             x_all = np.arange(len(loss_hist))
             x_label = "Epoch"
 
-        # -- Row 0: Log-Log training loss --
+        # -- Row 0: Log-Log training loss + theory plateaus --
         ax = axes[0, col]
+        theory_ys = _theory_loss_y_levels_from_run(rd, cfg)
+        _draw_theory_loss_hlines(ax, theory_ys)
         pos = x_all > 0
-        ax.plot(x_all[pos], np.asarray(loss_hist)[pos], lw=1.5, color="#1f77b4")
+        loss_arr = np.asarray(loss_hist)[pos]
+        ax.plot(
+            x_all[pos],
+            loss_arr,
+            lw=1.5,
+            color="#1f77b4",
+            zorder=3,
+        )
         ax.set_xscale("log")
         ax.set_yscale("log")
         _training_loss_log_y_floor(ax)
         ax.grid(True, alpha=0.3)
-        ax.set_xlabel(x_label, fontsize=9)
         if col == 0:
             ax.set_ylabel("Training Loss", fontsize=10)
-        else:
-            ax.tick_params(labelleft=False)
 
         hp_parts = [f"k={cfg['data']['k']}"]
         hp_parts.append(f"lr={cfg['training']['learning_rate']}")
@@ -2069,16 +2152,13 @@ def plot_combined_loss_and_power(
                     "color": colors_line[i],
                 }
             )
-        _add_line_labels(ax, lines_info, fontsize=8)
+        _add_line_labels(ax, lines_info, fontsize=7, min_frac_sep=0.14)
         ax.set_xscale("log")
         ax.grid(True, alpha=0.3)
-        ax.set_xlabel(x_label, fontsize=9)
         if col == 0:
             ax.set_ylabel("Power", fontsize=10)
-        else:
-            ax.tick_params(labelleft=False)
 
-        # -- Row 2: W dominant-mode / irrep fraction (same as plot_w_dominant_irrep_fraction) --
+        # -- Row 2: W dominant-mode / irrep fraction --
         ax = axes[2, col]
         wdata = load_w_dominant_irrep_fraction_for_run_dir(rd)
         if wdata is not None:
@@ -2118,7 +2198,16 @@ def plot_combined_loss_and_power(
         if col != 0:
             ax.tick_params(labelleft=False)
 
-    fig.subplots_adjust(hspace=0.35, wspace=0.15, top=0.88)
+    for col in range(n_cols):
+        axes[0, col].tick_params(labelbottom=False)
+        axes[1, col].tick_params(labelbottom=False)
+
+    # Align log-x epoch/step range within each column (independent axes; no sharex).
+    for col in range(n_cols):
+        x0 = min(axes[r, col].get_xlim()[0] for r in range(3))
+        x1 = max(axes[r, col].get_xlim()[1] for r in range(3))
+        for r in range(3):
+            axes[r, col].set_xlim(x0, x1)
     if save_path:
         fig.savefig(save_path, bbox_inches="tight", dpi=150)
         print(f"  \u2713 Saved {save_path}")

@@ -25,10 +25,123 @@ matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType fonts for PDF viewer compat
 matplotlib.rcParams["ps.fonttype"] = 42
 
 
+def _save_param_history_pt(param_hist: list, path: Path) -> None:
+    """Write ``param_history.pt``; legacy (non-zip) format avoids zip-writer failures on huge files."""
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        torch.save(
+            param_hist,
+            tmp,
+            pickle_protocol=4,
+            _use_new_zipfile_serialization=False,
+        )
+    except TypeError:
+        try:
+            torch.save(param_hist, tmp, _use_new_zipfile_serialization=False)
+        except TypeError:
+            torch.save(param_hist, tmp)
+    os.replace(tmp, path)
+
+
 def load_config(config_path: str) -> dict:
     """Load configuration from YAML file."""
     with open(config_path) as f:
         return yaml.safe_load(f)
+
+
+def _try_load_resume_training_state(run_dir: Path) -> dict | None:
+    """Load prior loss/param histories from *run_dir* for continued plotting.
+
+    Returns ``None`` if any expected file is missing (caller may still resume
+    weights-only from ``final_model.pt``).
+    """
+    tl = run_dir / "train_loss_history.npy"
+    vl = run_dir / "val_loss_history.npy"
+    ph = run_dir / "param_history.pt"
+    psi = run_dir / "param_save_indices.npy"
+    if not all(p.is_file() for p in (tl, vl, ph, psi)):
+        return None
+
+    train_loss_history = np.load(tl).tolist()
+    val_loss_history = np.load(vl).tolist()
+    param_history = torch.load(ph, map_location="cpu", weights_only=False)
+    param_save_indices = [int(x) for x in np.load(psi).tolist()]
+
+    if len(train_loss_history) != len(val_loss_history):
+        raise ValueError(
+            f"resume run {run_dir}: train_loss_history and val_loss_history length mismatch"
+        )
+    if len(param_history) != len(param_save_indices):
+        raise ValueError(
+            f"resume run {run_dir}: param_history and param_save_indices length mismatch"
+        )
+
+    initial_loss = float(val_loss_history[0])
+    return {
+        "train_loss_history": train_loss_history,
+        "val_loss_history": val_loss_history,
+        "param_history": param_history,
+        "param_save_indices": param_save_indices,
+        "initial_loss": initial_loss,
+    }
+
+
+def _apply_training_resume(model: nn.Module, config: dict, device: str) -> dict | None:
+    """Load ``training.resume_from`` weights; optionally full train/param history.
+
+    * Path ending in ``.pt`` → load that ``state_dict`` only (no history merge).
+    * Run directory → load ``checkpoints/final_model.pt``; if history files exist,
+      return a ``resume_state`` dict for :func:`train.train` / :func:`train.train_online`.
+
+    Optimizer state is never restored. ``--regenerate`` is unrelated (plots only).
+    """
+    raw = config.get("training", {}).get("resume_from")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+
+    path = Path(raw).expanduser()
+    resume_state: dict | None = None
+
+    if path.suffix.lower() == ".pt":
+        ckpt = path
+        if not ckpt.is_file():
+            raise FileNotFoundError(
+                f"training.resume_from={raw!r}: checkpoint file not found: {ckpt}"
+            )
+    else:
+        ckpt = path / "checkpoints" / "final_model.pt"
+        if not ckpt.is_file():
+            raise FileNotFoundError(
+                f"training.resume_from={raw!r}: expected {ckpt} (run directory or .pt path)"
+            )
+        resume_state = _try_load_resume_training_state(path)
+        if resume_state is None:
+            print(
+                "  Note: prior run directory missing some of train_loss_history.npy, "
+                "val_loss_history.npy, param_history.pt, param_save_indices.npy — "
+                "resuming weights only (plots will not include earlier segment)."
+            )
+
+    if not config.get("training", {}).get("save_param_snapshots", True):
+        if resume_state is not None:
+            print(
+                "  Note: save_param_snapshots=false — loading weights only "
+                "(not merging loss/param history from prior run)."
+            )
+        resume_state = None
+
+    state = torch.load(ckpt, map_location=device, weights_only=False)
+    model.load_state_dict(state, strict=True)
+    print(f"  ✓ Loaded weights from {ckpt}")
+    if resume_state is not None:
+        n_loss = len(resume_state["train_loss_history"])
+        n_snap = len(resume_state["param_history"])
+        print(
+            f"  ✓ Merging training history: {n_loss} loss points, {n_snap} param snapshots "
+            f"(next index {n_loss})"
+        )
+    return resume_state
 
 
 def setup_run_directory(base_dir: str = "runs") -> Path:
@@ -55,12 +168,17 @@ def save_results(
     template: np.ndarray,
     training_time: float,
     device: str,
+    save_param_snapshots: bool = True,
 ) -> dict:
     """Save all experiment results (histories, checkpoints, config).
 
     Plot-specific arrays such as ``power_data.npz`` and
     ``w_dominant_irrep_fraction.npz`` are written later by ``produce_plots_*``
     (not by this function).
+
+    If ``save_param_snapshots`` is False, ``param_history.pt`` is omitted (empty
+    ``param_save_indices.npy`` is still written). When the flag is omitted from
+    config, snapshots are saved (default True).
     """
     print(f"Saving results to {run_dir}...")
 
@@ -78,8 +196,12 @@ def save_results(
     # Save training history
     np.save(run_dir / "train_loss_history.npy", np.array(train_loss_hist))
     np.save(run_dir / "val_loss_history.npy", np.array(val_loss_hist))
-    torch.save(param_hist, run_dir / "param_history.pt")
-    np.save(run_dir / "param_save_indices.npy", np.array(param_save_indices))
+    if save_param_snapshots:
+        _save_param_history_pt(param_hist, run_dir / "param_history.pt")
+        np.save(run_dir / "param_save_indices.npy", np.array(param_save_indices))
+    else:
+        print("  (skipping param_history.pt; save_param_snapshots=false)")
+        np.save(run_dir / "param_save_indices.npy", np.array([], dtype=np.int64))
 
     # Save final model
     torch.save(model.state_dict(), checkpoints_dir / "final_model.pt")
@@ -1212,6 +1334,8 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
 
+    resume_state = _apply_training_resume(rnn_2d, config, device)
+
     criterion = nn.MSELoss()
 
     optimizer_name = config["training"]["optimizer"]
@@ -1337,6 +1461,8 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
 
     start_time = time.time()
 
+    save_param_snapshots = config["training"].get("save_param_snapshots", True)
+
     if training_mode == "online":
         from src import train as train_mod
 
@@ -1351,7 +1477,9 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
                 grad_clip=config["training"]["grad_clip"],
                 eval_dataloader=val_loader,
                 save_param_interval=config["training"]["save_param_interval"],
+                save_param_snapshots=save_param_snapshots,
                 reduction_threshold=reduction_threshold,
+                resume_state=resume_state,
             )
         )
     else:  # offline
@@ -1368,12 +1496,21 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
                 grad_clip=config["training"]["grad_clip"],
                 eval_dataloader=val_loader,
                 save_param_interval=config["training"]["save_param_interval"],
+                save_param_snapshots=save_param_snapshots,
                 reduction_threshold=reduction_threshold,
                 dense_save_until=config["training"].get("dense_save_until", 0),
+                resume_state=resume_state,
             )
         )
 
     training_time = time.time() - start_time
+
+    if not save_param_snapshots:
+        with torch.no_grad():
+            param_hist = [
+                {n: p.detach().cpu().clone() for n, p in rnn_2d.named_parameters()}
+            ]
+        param_save_indices = [int(final_step)]
 
     print("\nTraining complete!")
     print(f"  Final train loss: {train_loss_hist[-1]:.6f}")
@@ -1397,6 +1534,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
         tpl,
         training_time,
         device,
+        save_param_snapshots=save_param_snapshots,
     )
 
     ### ----- PRODUCE ALL PLOTS ----- ###
