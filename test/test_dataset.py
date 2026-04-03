@@ -155,17 +155,17 @@ class TestGroupCompositionDatasetOfflineCnxcn:
 
 
 class TestGroupCompositionDatasetOfflineGroup:
-    """Tests for GroupCompositionDataset with generic escnn groups (offline)."""
+    """Tests for GroupCompositionDataset with generic groups (offline)."""
 
     @pytest.fixture
     def d3_group(self):
-        from escnn.group import DihedralGroup
+        from src.groups import DihedralGroup
 
         return DihedralGroup(N=3)
 
     @pytest.fixture
     def template_d3(self, d3_group):
-        group_size = d3_group.order()
+        group_size = d3_group.order
         return np.random.randn(group_size).astype(np.float32)
 
     def test_sampled_shapes(self, template_d3, d3_group):
@@ -226,7 +226,7 @@ class TestGroupCompositionDatasetOfflineGroup:
         assert ds.sequence.shape == (num_samples, k)
 
     def test_template_mismatch_error(self, d3_group):
-        wrong_size = d3_group.order() + 1
+        wrong_size = d3_group.order + 1
         template = np.random.randn(wrong_size).astype(np.float32)
 
         with pytest.raises(AssertionError):

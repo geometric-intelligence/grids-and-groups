@@ -130,8 +130,8 @@ def test_main_d3(temp_run_dir, mock_savefig):
 def test_main_octahedral_config():
     """Test that octahedral config loads and validates correctly.
 
-    Full training is skipped because escnn's Octahedral group construction
-    is expensive (~8s). The D3 test already covers the full group pipeline
+    Full training is skipped because Octahedral group construction
+    is relatively expensive. The D3 test already covers the full group pipeline
     integration (same code path, just a different group).
     """
     import src.main as main
@@ -145,8 +145,8 @@ def test_main_octahedral_config():
 def test_main_a5_config():
     """Test that A5 config loads and validates correctly.
 
-    Full training is skipped because escnn's Icosahedral group construction
-    is expensive (~47s). The D3 test already covers the full group pipeline
+    Full training is skipped because Icosahedral group construction
+    is relatively expensive. The D3 test already covers the full group pipeline
     integration (same code path, just a different group).
     """
     import src.main as main

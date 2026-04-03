@@ -1,8 +1,8 @@
 """Tests for src.power module."""
 
 import numpy as np
-from escnn.group import Octahedral
 
+from src.groups import DihedralGroup, OctahedralGroup
 import src.power as power
 import src.template as template
 
@@ -203,68 +203,60 @@ class TestTopkTemplateFreqs:
 class TestPowersPerNeuronRowsCyclic:
     """Tests for power.powers_per_neuron_rows_cyclic."""
 
-    def test_1d_matches_cyclicpower(self):
-        """Each row must match CyclicPower on that row (C_n)."""
+    def test_1d_shape(self):
+        """Each row must produce the correct power shape for C_n."""
         p = 10
         h = 3
         W = np.random.RandomState(1).randn(h, p)
         out = power.powers_per_neuron_rows_cyclic(W, template_dim=1)
         assert out.shape == (h, (p // 2) + 1)
         for i in range(h):
-            np.testing.assert_allclose(
-                out[i], power.CyclicPower(W[i], template_dim=1).power, rtol=1e-10
-            )
+            expected, _ = power.get_power_1d(W[i])
+            np.testing.assert_allclose(out[i], expected, rtol=1e-10)
 
-    def test_2d_rectangular_matches_cyclicpower(self):
+    def test_2d_rectangular_shape(self):
         p1, p2 = 2, 3
         h = 2
         W = np.random.RandomState(2).randn(h, p1 * p2)
         out = power.powers_per_neuron_rows_cyclic(W, template_dim=2, p1=p1, p2=p2)
-        cp0 = power.CyclicPower(W[0], template_dim=2, p1=p1, p2=p2)
-        assert out.shape[1] == cp0.power.size
-        np.testing.assert_allclose(out[0], cp0.power.ravel(), rtol=1e-10)
+        expected_0 = power.get_power_2d(W[0].reshape(p1, p2), no_freq=True)
+        assert out.shape[1] == expected_0.size
+        np.testing.assert_allclose(out[0], expected_0.ravel(), rtol=1e-10)
 
 
 class TestPowersPerNeuronRows:
     """Tests for power.powers_per_neuron_rows."""
 
-    def test_matches_rowwise_grouppower(self):
-        """Each row must match GroupPower on that row."""
-        from escnn.group import DihedralGroup
-
+    def test_matches_rowwise_group_power_spectrum(self):
+        """Each row must match group.power_spectrum on that row."""
         group = DihedralGroup(3)
-        h, n = 5, group.order()
+        h, n = 5, group.order
         W = np.random.RandomState(0).randn(h, n)
         out = power.powers_per_neuron_rows(W, group)
         assert out.shape == (h, len(group.irreps()))
         for i in range(h):
-            np.testing.assert_allclose(out[i], power.GroupPower(W[i], group).power, rtol=1e-10)
-
-
-class TestGroupPower:
-    """Tests for power.GroupPower class."""
-
-    def test_group_power_spectrum(self):
-        """Test that power.GroupPower computes correct power spectrum."""
-        group = Octahedral()
-        powers = [0.0, 20.0, 20.0, 100.0, 0.0]
-        tpl = template.fixed_group(group, powers=powers)
-
-        gp = power.GroupPower(tpl, group)
-
-        assert np.allclose(gp.power, powers), f"Power spectrum mismatch: {gp.power} vs {powers}"
+            np.testing.assert_allclose(
+                out[i], group.power_spectrum(W[i]), rtol=1e-10
+            )
 
 
 class TestGroupPowerSpectrum:
-    """Tests for standalone power.group_power_spectrum function."""
+    """Tests for group.power_spectrum via Group objects."""
 
-    def test_matches_class_method(self):
-        """Test that standalone function matches GroupPower class result."""
-        group = Octahedral()
+    def test_group_power_spectrum(self):
+        """Test that group.power_spectrum computes correct power from a template.
+
+        power_spectrum returns dim(rho) * Tr(hat_x^H @ hat_x) without dividing
+        by |G|, so the expected values are the input powers scaled by group.order.
+        """
+        group = OctahedralGroup()
         powers = [0.0, 20.0, 20.0, 100.0, 0.0]
         tpl = template.fixed_group(group, powers=powers)
 
-        spectrum = power.group_power_spectrum(group, tpl)
-        gp = power.GroupPower(tpl, group)
+        spectrum = group.power_spectrum(tpl)
 
-        np.testing.assert_allclose(spectrum, gp.power, atol=1e-10)
+        expected = [p * group.order for p in powers]
+        np.testing.assert_allclose(
+            spectrum, expected, atol=1e-4,
+            err_msg=f"Power spectrum mismatch: {spectrum} vs {expected}"
+        )

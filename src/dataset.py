@@ -177,18 +177,15 @@ class GroupCompositionDataset(Dataset):
         num_samples=65536,
         return_all_outputs=False,
     ):
-        """Build dataset arrays for any escnn group with a regular representation."""
-        group_size = group.order()
+        """Build dataset arrays for any group with a regular representation."""
+        group_size = group.order
 
         assert template.shape == (group_size,), (
             f"template must be ({group_size},), got {template.shape}"
         )
 
-        regular_rep = group.representations["regular"]
-        elements = list(group.elements)
-        n_elements = len(elements)
-
-        rep_matrices = np.array([regular_rep(g) for g in elements])
+        n_elements = group_size
+        rep_matrices = group.regular_rep()
 
         if mode == "exhaustive":
             total = n_elements**k

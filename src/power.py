@@ -1,263 +1,119 @@
 import numpy as np
 import torch
 
-import src.fourier as fourier
+
+# ---------------------------------------------------------------------------
+# Loss plateau prediction functions (extracted from former CyclicPower /
+# GroupPower classes)
+# ---------------------------------------------------------------------------
 
 
-class CyclicPower:
-    """Compute and store the power spectrum of the template, which can be used
-    to compute theoretical loss plateau predictions for the ZnZ group and compare to learned power spectrum.
+def loss_plateau_predictions_cyclic(template, template_dim, p1=None, p2=None):
+    """Compute theoretical loss plateau predictions for a cyclic template.
 
     Parameters
     ----------
-    template : ndarray (group_size,) or (group_size*group_size,)
-        Flattened template array.
+    template : np.ndarray
+        The template array.  For ``template_dim == 1``, shape ``(group_size,)``.
+        For ``template_dim == 2``, shape ``(p1, p2)`` or flattened ``(p1*p2,)``.
     template_dim : int
-        ``1`` for C_n (1D cyclic), ``2`` for C_n × C_m as a 2D grid.
+        ``1`` for C_n (1D cyclic), ``2`` for C_n x C_m (2D).
     p1, p2 : int, optional
-        For ``template_dim == 2``, grid shape ``(p1, p2)`` when the grid is not square.
-        If omitted, the template must be square ``(g, g)`` with ``len(template) == g**2``.
+        Required when ``template_dim == 2`` to specify the grid shape.
+
+    Returns
+    -------
+    list of float
+        Theoretical loss plateau predictions for each nonzero power, in descending order.
     """
+    template = np.asarray(template)
 
-    def __init__(self, template, template_dim, p1=None, p2=None):
-        self.template = np.asarray(template).ravel()
-        self.template_dim = template_dim
-        self._p1 = p1
-        self._p2 = p2
-        if template_dim == 2:
-            if p1 is not None and p2 is not None:
-                if self.template.size != p1 * p2:
-                    raise ValueError(
-                        f"template length {self.template.size} must equal p1*p2={p1 * p2}"
-                    )
-                self.template_2D = self.template.reshape((p1, p2))
-                self.group_size = p1 * p2
-            else:
-                g = int(np.sqrt(len(self.template)))
-                if g * g != len(self.template):
-                    raise ValueError(
-                        "2D cyclic template must be square or pass p1, p2 for a rectangular grid"
-                    )
-                self.group_size = g
-                self.template_2D = self.template.reshape((self.group_size, self.group_size))
-            self.x_freqs, self.y_freqs, self.power = self.cnxcn_power_spectrum(return_freqs=True)
+    if template_dim == 2:
+        if p1 is not None and p2 is not None:
+            template_2d = template.reshape((p1, p2))
+            group_size = p1 * p2
+            print("Computing loss plateau predictions for template of shape:", (p1, p2))
         else:
-            self.group_size = len(self.template)
-            self.freqs, self.power = self.cn_power_spectrum(return_freqs=True)
+            flat = template.ravel()
+            g = int(np.sqrt(len(flat)))
+            if g * g != len(flat):
+                raise ValueError(
+                    "2D cyclic template must be square or pass p1, p2 for a rectangular grid"
+                )
+            template_2d = flat.reshape((g, g))
+            group_size = g * g
+            print("Computing loss plateau predictions for template of shape:", (g, g))
 
-    def cn_power_spectrum(self, return_freqs=False):
-        """Compute the 1D power spectrum of 1D FT."""
-        num_coefficients = (self.group_size // 2) + 1
-
-        # Perform FFT and calculate power spectrum
-        ft = np.fft.fft(
-            self.template
-        )  # Could consider using np.fft.rfft which is designed for real valued input.
-        power = np.abs(ft[:num_coefficients]) ** 2 / self.group_size
-
-        # Double power for frequencies strictly between 0 and Nyquist (Nyquist is not doubled if p is even)
-        if (
-            self.group_size % 2 == 0
-        ):  # group size is even, Nyquist frequency at index num_coefficients - 1
-            power[1 : num_coefficients - 1] *= 2
-        else:  # p is odd, no Nyquist frequency
-            power[1:] *= 2
-
-        # Confirm the power sum approximates the squared norm of points
-        total_power = np.sum(power)
-        norm_squared = np.linalg.norm(self.template) ** 2
-        if not np.isclose(total_power, norm_squared, rtol=1e-3):
-            print(
-                f"Warning: Total power {total_power:.3f} does not match norm squared {norm_squared:.3f}"
-            )
-
-        if return_freqs:
-            freqs = np.fft.rfftfreq(self.group_size)
-            return freqs, power
-
-        return power
-
-    def cnxcn_power_spectrum(self, return_freqs=False):
-        """
-        Compute the 2D power spectrum of 2D FT.
-
-        Why are some powers doubled?
-        rfft2 removes redundant frequencies along first axis automatically
-        but does not truncate the second axis
-        Therefore, the output shape is (M, N//2 + 1).
-        This eliminates redundancy, save for a specific cases:
-        --> All frequencies along the first axis at (u, 0) for u = N//2 + 1, ..., N - 1
-        are redundant and contain the same information as (u, 0) for u = 1, ..., N//2 - 1.
-
-        Since most of the power coefficients now represnet 2 frequencies (positive and negative),
-        we double all the power coefficients to conserve total power.
-        However, we do not double the DC component (0, 0) and the Nyquist frequency (N/2, 0) if N is even,
-        since these are unique and do not have a negative counterpart.
-
-        Parameters
-        ----------
-        template : ndarray (M, N)
-            Real-valued 2D input array.
-
-        Returns
-        -------
-        row_freqs : ndarray (M,)
-            Frequency bins for the first axis (rows).
-        column_freqs : ndarray (N//2 + 1,)
-            Frequency bins for the second axis (columns).
-        power : ndarray (M, N//2 + 1)
-            Power spectrum of the input.
-        """
-        M, N = self.template_2D.shape
-
-        # Perform 2D rFFT
-        ft = np.fft.rfft2(self.template_2D)
-
-        # Power spectrum normalized by total number of samples
+        ft = np.fft.rfft2(template_2d)
+        M, N = template_2d.shape
         power = np.abs(ft) ** 2 / (M * N)
-
-        # For the first row (u=0), remove redundant frequencies and double the appropriate ones
-        power[(N // 2 + 1) :, 0] = 0
-
+        power[(N // 2 + 1):, 0] = 0
         power *= 2
         power[0, 0] /= 2
         if N % 2 == 0:
             power[N // 2, 0] /= 2
+        power = power.flatten()
+    else:
+        template = template.ravel()
+        group_size = len(template)
+        num_coefficients = (group_size // 2) + 1
+        ft = np.fft.fft(template)
+        power = np.abs(ft[:num_coefficients]) ** 2 / group_size
+        if group_size % 2 == 0:
+            power[1: num_coefficients - 1] *= 2
+        else:
+            power[1:] *= 2
 
-        # Check Parseval’s theorem
-        total_power = np.sum(power)
-        norm_squared = np.linalg.norm(self.template_2D) ** 2
-        if not np.isclose(total_power, norm_squared, rtol=1e-3):
-            print(
-                f"Warning: Total power {total_power:.3f} does not match norm squared {norm_squared:.3f}"
-            )
+    nonzero_power_mask = power > 1e-20
+    power = power[nonzero_power_mask]
+    i_power_descending_order = np.argsort(power)[::-1]
+    power = power[i_power_descending_order]
 
-        if return_freqs:
-            # Frequency bins
-            row_freqs = np.fft.fftfreq(M)  # full symmetric frequencies (rows)
-            column_freqs = np.fft.rfftfreq(N)  # only non-negative frequencies (columns)
-
-            return row_freqs, column_freqs, power
-
-        return power
-
-    def loss_plateau_predictions(self):
-        """Compute theoretical loss plateau predictions from the template's power spectrum.
-        (as predicted by AGF)
-
-        Returns
-        -------
-        plateau_predictions : list of float
-            Theoretical loss plateau predictions for each nonzero power, in descending order.
-        """
-        power = self.power
-
-        if self.template_dim == 2:
-            if self._p1 is not None and self._p2 is not None:
-                print(
-                    "Computing loss plateau predictions for template of shape:",
-                    (self._p1, self._p2),
-                )
-            else:
-                img_size = int(np.sqrt(len(self.template)))
-                print(
-                    "Computing loss plateau predictions for template of shape:",
-                    (img_size, img_size),
-                )
-            power = power.flatten()
-
-        nonzero_power_mask = power > 1e-20
-        power = power[nonzero_power_mask]
-        i_power_descending_order = np.argsort(power)[::-1]
-        power = power[i_power_descending_order]
-
-        plateau_predictions = [np.sum(power[k:]) for k in range(len(power))]
-        coef = 1 / self.group_size
-        plateau_predictions = [alpha * coef for alpha in plateau_predictions]
-
-        return plateau_predictions
+    coef = 1 / group_size
+    return [coef * np.sum(power[k:]) for k in range(len(power))]
 
 
-class GroupPower:
-    """Compute and store the power spectrum of the template for a generic group.
+def loss_plateau_predictions_group(template, group):
+    """Compute theoretical loss plateau predictions for a generic group template.
 
     Parameters
     ----------
-    template : ndarray (group_size,)
-        1D template array of length ``group.order()``.
-    group : Group (escnn object)
-        The group the template is defined over.
-        Also specifies which fourier transform to apply, and thus
-        which transform to compute the power spectrum for.
+    template : np.ndarray, shape (group.order,)
+        The template array.
+    group : Group
+        A group instance with a ``power_spectrum`` method.
+
+    Returns
+    -------
+    list of float
+        Theoretical loss plateau predictions for each nonzero power, in descending order.
     """
+    p = len(template)
+    print("Computing loss plateau predictions for template of shape:", (p,))
+    power = group.power_spectrum(template)
+    nonzero_power_mask = power > 1e-20
+    power = power[nonzero_power_mask]
+    print("Found ", len(power), "non-zero power coefficients.")
+    i_power_descending_order = np.argsort(power)[::-1]
+    power = power[i_power_descending_order]
+    coef = 1 / p
+    return [coef * np.sum(power[k:]) for k in range(len(power))]
 
-    def __init__(self, template, group):
-        self.template = template
-        self.group_size = len(template)
-        self.group = group
-        self.power = self.group_power_spectrum()
-        self.freqs = list(range(len(self.power)))
 
-    def group_power_spectrum(self):
-        """Compute the (group) power spectrum of the template.
-
-        For each irrep rho, the power is given by:
-        ||hat x(rho)||_rho = dim(rho) * Tr(hat x(rho)^dagger * hat x(rho))
-        where hat x(rho) is the (matrix) Fourier coefficient of template x at irrep rho.
-
-        We multiply by the dimension of the irrep because for 2D irreps, the power
-        would otherwise be split across two dimensions, so we must double it to get the correct
-        total power.
-
-        Returns
-        -------
-        power_spectrum : np.ndarray, shape=[len(group.irreps())]
-            The power spectrum of the template.
-        """
-        fourier_coefs = fourier.group_fourier(self.group, self.template)
-        irreps = self.group.irreps()
-
-        power_spectrum = np.zeros(len(irreps))
-        for i, irrep in enumerate(irreps):
-            fc = fourier_coefs[i]
-            power_spectrum[i] = irrep.size * np.trace(fc.conj().T @ fc)
-        power_spectrum = power_spectrum / self.group.order()
-
-        return np.array(power_spectrum)
-
-    def loss_plateau_predictions(self):
-        """Compute theoretical loss plateau predictions from the template's power spectrum.
-
-        The loss plateau predictions give the levels of the loss plot.
-
-        Returns
-        -------
-        plateau_predictions : list of float
-            Theoretical loss plateau predictions for each nonzero power, in descending order.
-        """
-        p = len(self.template)
-        print("Computing loss plateau predictions for template of shape:", (p,))
-        power = self.power
-        nonzero_power_mask = power > 1e-20
-        power = power[nonzero_power_mask]
-        print("Found ", len(power), "non-zero power coefficients.")
-        i_power_descending_order = np.argsort(power)[::-1]
-        power = power[i_power_descending_order]
-        plateau_predictions = [np.sum(power[k:]) for k in range(len(power))]
-        coef = 1 / p
-        plateau_predictions = [alpha * coef for alpha in plateau_predictions]
-        return plateau_predictions
+# ---------------------------------------------------------------------------
+# Per-neuron power helpers
+# ---------------------------------------------------------------------------
 
 
 def powers_per_neuron_rows(W: np.ndarray, group) -> np.ndarray:
-    """Irrep power spectrum for each row of ``W`` using :class:`GroupPower`.
+    """Irrep power spectrum for each row of ``W`` using ``group.power_spectrum``.
 
-    Each row is treated as a real signal on ``group`` (length ``group.order()``).
+    Each row is treated as a real signal on ``group`` (length ``group.order``).
 
     Parameters
     ----------
-    W : ndarray, shape (hidden_dim, group.order())
-    group : escnn ``Group``
+    W : ndarray, shape (hidden_dim, group.order)
+    group : Group
         Must match the group structure of the weight rows.
 
     Returns
@@ -267,13 +123,13 @@ def powers_per_neuron_rows(W: np.ndarray, group) -> np.ndarray:
     """
     if W.ndim != 2:
         raise ValueError(f"W must be 2-D, got shape {W.shape}")
-    if W.shape[1] != group.order():
-        raise ValueError(f"W.shape[1] ({W.shape[1]}) must equal group.order() ({group.order()})")
+    if W.shape[1] != group.order:
+        raise ValueError(f"W.shape[1] ({W.shape[1]}) must equal group.order ({group.order})")
     hidden = W.shape[0]
     n_irreps = len(group.irreps())
     out = np.empty((hidden, n_irreps))
     for h in range(hidden):
-        out[h] = GroupPower(W[h], group).power
+        out[h] = group.power_spectrum(W[h])
     return out
 
 
@@ -284,7 +140,7 @@ def powers_per_neuron_rows_cyclic(
     p1: int | None = None,
     p2: int | None = None,
 ) -> np.ndarray:
-    """Cyclic power spectrum for each row of ``W`` using :class:`CyclicPower`.
+    """Cyclic power spectrum for each row of ``W``.
 
     Parameters
     ----------
@@ -297,8 +153,9 @@ def powers_per_neuron_rows_cyclic(
     Returns
     -------
     ndarray
-        For 1D, shape ``(hidden_dim, group_size // 2 + 1)``. For 2D, shape ``(hidden_dim, M * (N//2 + 1))``
-        with ``M, N = p1, p2`` (flattened :class:`CyclicPower` 2D power).
+        For 1D, shape ``(hidden_dim, group_size // 2 + 1)``.
+        For 2D, shape ``(hidden_dim, M * (N//2 + 1))``
+        with ``M, N = p1, p2``.
     """
     if W.ndim != 2:
         raise ValueError(f"W must be 2-D, got shape {W.shape}")
@@ -308,20 +165,21 @@ def powers_per_neuron_rows_cyclic(
         num_coeffs = (p // 2) + 1
         out = np.empty((hidden, num_coeffs))
         for h in range(hidden):
-            out[h] = CyclicPower(W[h], template_dim=1).power
+            pw, _ = get_power_1d(W[h])
+            out[h] = pw
         return out
     if template_dim != 2:
         raise ValueError(f"template_dim must be 1 or 2, got {template_dim}")
     if p1 is None or p2 is None:
-        raise ValueError("p1 and p2 are required for cyclic 2D (CyclicPower template_dim=2)")
+        raise ValueError("p1 and p2 are required for cyclic 2D power (template_dim=2)")
     if W.shape[1] != p1 * p2:
         raise ValueError(f"W.shape[1] ({W.shape[1]}) must equal p1*p2 ({p1 * p2})")
-    cp0 = CyclicPower(W[0], template_dim=2, p1=p1, p2=p2)
-    n_bins = cp0.power.size
+    pw0 = get_power_2d(W[0].reshape(p1, p2), no_freq=True)
+    n_bins = pw0.size
     out = np.empty((hidden, n_bins))
-    out[0] = cp0.power.ravel()
+    out[0] = pw0.ravel()
     for h in range(1, hidden):
-        out[h] = CyclicPower(W[h], template_dim=2, p1=p1, p2=p2).power.ravel()
+        out[h] = get_power_2d(W[h].reshape(p1, p2), no_freq=True).ravel()
     return out
 
 
@@ -338,48 +196,43 @@ def model_power_over_time(group_name, model, param_history, model_inputs, group=
         List of model parameters at each training step.
     model_inputs : torch.Tensor
         Input data tensor.
-    group : Group (escnn object)
-        The escnn group object. Optional, since we don't use escnn for cnxcn.
+    group : Group, optional
+        Required for non-cyclic groups.
 
     Returns
     -------
     avg_power_history : list of ndarray (num_steps, num_freqs)
         List of average power spectra at each step.
     """
-    # Determine output shape: support both 1D and 2D
     model.eval()
     with torch.no_grad():
         test_output = model(model_inputs[:1])
     output_shape = test_output.shape[1:]
 
-    if group_name == "cnxcn":  # 2D template
+    if group_name == "cnxcn":
         p1 = int(np.sqrt(output_shape[0]))
         p2 = p1
         template_power_length = p1 * (p2 // 2 + 1)
         reshape_dims = (-1, p1, p2)
-    elif group_name == "cn":  # 1D template
+    elif group_name == "cn":
         template_power_length = (output_shape[0] // 2) + 1
         p1 = output_shape[0]
         reshape_dims = (-1, p1)
-    else:  # other groups are 1D signals
+    else:
         template_power_length = len(group.irreps())
         p1 = output_shape[0]
         reshape_dims = (-1, p1)
 
     num_points = 200
     max_step = len(param_history) - 1
-    num_inputs_to_compute_power = max(1, len(model_inputs) // 50)  # Ensure at least 1 input
-    X_tensor = model_inputs[
-        :num_inputs_to_compute_power
-    ]  # Added by Nina to speed up computation with octahedral.
+    num_inputs_to_compute_power = max(1, len(model_inputs) // 50)
+    X_tensor = model_inputs[:num_inputs_to_compute_power]
     if max_step <= 1:
-        # Very short training: just use all available checkpoints
         steps = np.arange(max_step + 1)
     else:
         steps = np.unique(np.logspace(1, np.log10(max_step), num_points, dtype=int))
         steps = steps[steps > 50]
         steps = np.hstack([np.linspace(1, min(50, max_step), 5).astype(int), steps])
-    # Ensure all indices are within bounds
     steps = np.unique(steps)
     steps = steps[steps <= max_step]
     powers_over_time = np.zeros([len(steps), template_power_length])
@@ -398,29 +251,25 @@ def model_power_over_time(group_name, model, param_history, model_inputs, group=
             powers = []
             for out in outputs_arr:
                 if group_name == "cnxcn":
-                    output_power = CyclicPower(out.flatten(), template_dim=2)
+                    one_power = get_power_2d(out, no_freq=True).flatten()
                 elif group_name == "cn":
-                    output_power = CyclicPower(out.flatten(), template_dim=1)
+                    one_power, _ = get_power_1d(out.flatten())
                 else:
-                    output_power = GroupPower(out.flatten(), group=group)
-
-                one_power = output_power.power
-                # flatten to 1D for both 1D and 2D cases
-                one_power_flat = one_power.flatten()
-                powers.append(one_power_flat)
+                    one_power = group.power_spectrum(out.flatten())
+                powers.append(one_power.flatten())
             powers = np.array(powers)
 
-            average_power = np.mean(powers, axis=0)  # shape: (num_samples, template_power_length)
+            average_power = np.mean(powers, axis=0)
             powers_over_time[i_step, :] = average_power
 
-    powers_over_time = np.array(powers_over_time)  # shape: (steps, num_freqs)
+    powers_over_time = np.array(powers_over_time)
     powers_over_time[powers_over_time < 1e-20] = 0
 
     return powers_over_time, steps
 
 
 # ---------------------------------------------------------------------------
-# Power spectrum computation functions (moved from utils.py)
+# Power spectrum computation functions
 # ---------------------------------------------------------------------------
 
 
@@ -502,11 +351,11 @@ def get_power_2d(points, no_freq=False):
 
     weight = 2 * np.ones((M, N // 2 + 1))
     weight[0, 0] = 1
-    weight[(M // 2 + 1) :, 0] = 0
+    weight[(M // 2 + 1):, 0] = 0
     if M % 2 == 0:
         weight[M // 2, 0] = 1
     if N % 2 == 0:
-        weight[(M // 2 + 1) :, N // 2] = 0
+        weight[(M // 2 + 1):, N // 2] = 0
         weight[0, N // 2] = 1
     if (M % 2 == 0) and (N % 2 == 0):
         weight[M // 2, N // 2] = 1
@@ -605,32 +454,3 @@ def theoretical_final_loss_2d(template_2d):
 def theoretical_final_loss_1d(template_1d):
     """Returns expected initial loss (for setting convergence targets)."""
     return theoretical_loss_levels_1d(template_1d)["initial"]
-
-
-def group_power_spectrum(group, template):
-    """Compute the (group) power spectrum of the template.
-
-    For each irrep rho, the power is given by:
-    ||hat x(rho)||_rho = dim(rho) * Tr(hat x(rho)^dagger * hat x(rho))
-
-    Parameters
-    ----------
-    group : Group (escnn object)
-        The group.
-    template : np.ndarray, shape=[group.order()]
-        The template to compute the power spectrum of.
-
-    Returns
-    -------
-    power_spectrum : np.ndarray, shape=[len(group.irreps())]
-        The power spectrum of the template.
-    """
-    fourier_coefs = fourier.group_fourier(group, template)
-    irreps = group.irreps()
-
-    power_spectrum = np.zeros(len(irreps))
-    for i, irrep in enumerate(irreps):
-        fc = fourier_coefs[i]
-        power_spectrum[i] = irrep.size * np.trace(fc.conj().T @ fc)
-    power_spectrum = power_spectrum / group.order()
-    return np.array(power_spectrum)

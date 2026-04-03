@@ -28,7 +28,6 @@ scikit-learn = "^1.7.2"
 tqdm = "^4.67.1"
 seaborn = "^0.13.2"
 jupyter-black = "^0.4.0"
-escnn = "^1.0.11"
 
 
 [build-system]
@@ -60,7 +59,7 @@ ignore = [
     "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults
     "B905",  # zip without strict
-    "F403",  # star imports (used intentionally for escnn.group)
+    "F403",  # star imports
     "F405",  # may be undefined from star imports
     "F841",  # local variable assigned but never used (common in notebooks/experiments)
     "B007",  # loop control variable not used (common pattern)

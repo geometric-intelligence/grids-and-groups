@@ -107,13 +107,13 @@ class TestFixedGroup:
     @pytest.fixture
     def dihedral_group(self):
         """Create a DihedralGroup for testing."""
-        from escnn.group import DihedralGroup
+        from src.groups import DihedralGroup
 
         return DihedralGroup(N=3)
 
     def test_output_shape(self, dihedral_group):
         """Test that output shape matches group order."""
-        group_order = dihedral_group.order()
+        group_order = dihedral_group.order
         num_irreps = len(list(dihedral_group.irreps()))
         powers = [1.0] * num_irreps
 

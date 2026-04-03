@@ -1,7 +1,5 @@
 import numpy as np
 
-import src.fourier as fourier
-
 
 def one_hot(group_size):
     """One-hot, with 0th frequency removed (!) encoding of an integer value in R^group_size."""
@@ -117,7 +115,7 @@ def fixed_group(group, powers):
 
     Parameters
     ----------
-    group : Group (escnn object)
+    group : Group
         The group.
     powers : list of float
         Desired spectral power for each irrep (one entry per irrep).
@@ -127,7 +125,7 @@ def fixed_group(group, powers):
     template : np.ndarray, shape (group.order(),), dtype float32
         The mean-centered template.
     """
-    group_order = group.order()
+    group_order = group.order
     irreps = group.irreps()
     irrep_dims = [ir.size for ir in irreps]
 
@@ -146,7 +144,7 @@ def fixed_group(group, powers):
         np.fill_diagonal(mat, np.full(irrep.size, diag_val, dtype=float))
         spectrum.append(mat)
 
-    template = fourier.group_fourier_inverse(group, spectrum)
+    template = group.inverse_fourier(spectrum)
     template = template - np.mean(template)
     template = template.astype(np.float32)
 

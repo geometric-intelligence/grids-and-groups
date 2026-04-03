@@ -202,17 +202,17 @@ def regenerate_plots(run_dir, device="cpu"):
         )
     elif group_name in ("dihedral", "octahedral", "A5"):
         if group_name == "dihedral":
-            from escnn.group import DihedralGroup
+            from src.groups import DihedralGroup
 
             group = DihedralGroup(N=config["data"].get("group_n", 3))
         elif group_name == "octahedral":
-            from escnn.group import Octahedral
+            from src.groups import OctahedralGroup
 
-            group = Octahedral()
+            group = OctahedralGroup()
         else:
-            from escnn.group import Icosahedral
+            from src.groups import IcosahedralGroup
 
-            group = Icosahedral()
+            group = IcosahedralGroup()
         produce_plots_group(
             run_dir=run_dir,
             config=config,
@@ -801,7 +801,7 @@ def produce_plots_group(
     group=None,
 ):
     """
-    Generate all analysis plots after training for any escnn group.
+    Generate all analysis plots after training for any group.
 
     Args:
         run_dir: Directory to save plots
@@ -812,18 +812,18 @@ def produce_plots_group(
         train_loss_hist: Training loss history
         template: 1D template array of shape (group_size,)
         device: Device string ('cpu' or 'cuda')
-        group: escnn group object (required)
+        group: Group object (required)
     """
     group_name = config["data"]["group_name"]
 
     # Build a human-readable label for plot titles
     if group_name == "dihedral":
         n = config["data"].get("group_n", 3)
-        group_label = f"D{n} (Dihedral, order {group.order()})"
+        group_label = f"D{n} (Dihedral, order {group.order})"
     elif group_name == "octahedral":
-        group_label = f"Octahedral (order {group.order()})"
+        group_label = f"Octahedral (order {group.order})"
     elif group_name == "A5":
-        group_label = f"A5 / Icosahedral (order {group.order()})"
+        group_label = f"A5 / Icosahedral (order {group.order})"
     else:
         group_label = group_name
 
@@ -835,7 +835,7 @@ def produce_plots_group(
     plot_power_spectrum = plots_bool_dict.get("power_spectrum", True)
     plot_w_dominant_irrep_fraction_bool = plots_bool_dict.get("w_dominant_irrep_fraction", True)
 
-    group_size = group.order()
+    group_size = group.order
 
     k = config["data"]["k"]
     batch_size = config["data"]["batch_size"]
@@ -1015,7 +1015,7 @@ def produce_plots_group(
         if fig_w is None:
             print(
                 "  (skipped w_dominant_irrep_fraction: need W or W_out with second dim"
-                f" {group_size} matching escnn group order)"
+                f" {group_size} matching group order)"
             )
 
     viz.maybe_save_w_dominant_irrep_fraction_npz(
@@ -1123,25 +1123,24 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
             plt.close(fig)
             print("  ✓ Saved template")
     elif group_name in ("dihedral", "octahedral", "A5"):
-        # Construct the escnn group object
         if group_name == "dihedral":
-            from escnn.group import DihedralGroup
+            from src.groups import DihedralGroup
 
             n = group_n if group_n is not None else 3
             group = DihedralGroup(N=n)
             group_label = f"Dihedral D{n}"
         elif group_name == "octahedral":
-            from escnn.group import Octahedral
+            from src.groups import OctahedralGroup
 
-            group = Octahedral()
+            group = OctahedralGroup()
             group_label = "Octahedral"
         elif group_name == "A5":
-            from escnn.group import Icosahedral
+            from src.groups import IcosahedralGroup
 
-            group = Icosahedral()
+            group = IcosahedralGroup()
             group_label = "Icosahedral (A5)"
 
-        group_size = group.order()
+        group_size = group.order
 
         print(f"{group_label} group order: {group_size}")
         print(f"{group_label} irreps: {[irrep.size for irrep in group.irreps()]} (dimensions)")
