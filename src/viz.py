@@ -327,7 +327,9 @@ def plot_train_loss_with_theory(
 
     ax.plot(x_values, loss_history, lw=4, color="#1f77b4", label="Training Loss")
 
-    for y in power.loss_plateau_predictions_cyclic(template_2d.ravel(), template_dim=2, p1=p1, p2=p2):
+    for y in power.loss_plateau_predictions_cyclic(
+        template_2d.ravel(), template_dim=2, p1=p1, p2=p2
+    ):
         ax.axhline(y=y, color="black", linestyle="--", linewidth=2, zorder=-2)
 
     ax.set_xlabel(x_label, fontsize=24)
@@ -1093,7 +1095,10 @@ def plot_power_1d(
 
     ax1.plot(loss_epochs, loss_history_subset, lw=4, color="#1f77b4", label="Training Loss")
 
-    y_levels = np.array(power.loss_plateau_predictions_cyclic(np.asarray(template_1d).ravel(), template_dim=1), dtype=float)
+    y_levels = np.array(
+        power.loss_plateau_predictions_cyclic(np.asarray(template_1d).ravel(), template_dim=1),
+        dtype=float,
+    )
 
     n_bands = max(0, min(len(tracked_freqs), len(y_levels) - 1)) if len(y_levels) else 0
     for i in range(n_bands):
