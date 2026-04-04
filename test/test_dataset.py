@@ -5,20 +5,23 @@ import pytest
 import torch
 
 import src.dataset as dataset
+from src.groups.cn import CyclicGroup
+from src.groups.cnxcn import ProductCyclicGroup
+from src.groups import DihedralGroup
 
 
 class TestGroupCompositionDatasetOfflineCn:
-    """Tests for GroupCompositionDataset with group_name='cn' (offline)."""
+    """Tests for GroupCompositionDataset with CyclicGroup (offline)."""
 
     def test_sampled_shapes(self):
         group_size = 7
+        group = CyclicGroup(N=group_size)
         template = np.random.randn(group_size).astype(np.float32)
         k = 3
         num_samples = 100
 
         ds = dataset.GroupCompositionDataset(
-            "cn",
-            group_size=group_size,
+            group,
             template=template,
             k=k,
             mode="sampled",
@@ -32,12 +35,12 @@ class TestGroupCompositionDatasetOfflineCn:
 
     def test_exhaustive_shapes(self):
         group_size = 7
+        group = CyclicGroup(N=group_size)
         template = np.random.randn(group_size).astype(np.float32)
         k = 2
 
         ds = dataset.GroupCompositionDataset(
-            "cn",
-            group_size=group_size,
+            group,
             template=template,
             k=k,
             mode="exhaustive",
@@ -51,13 +54,13 @@ class TestGroupCompositionDatasetOfflineCn:
 
     def test_return_all_outputs(self):
         group_size = 7
+        group = CyclicGroup(N=group_size)
         template = np.random.randn(group_size).astype(np.float32)
         k = 4
         num_samples = 50
 
         ds = dataset.GroupCompositionDataset(
-            "cn",
-            group_size=group_size,
+            group,
             template=template,
             k=k,
             mode="sampled",
@@ -70,31 +73,14 @@ class TestGroupCompositionDatasetOfflineCn:
         assert ds.Y.shape == (num_samples, k - 1, group_size)
         assert ds.sequence.shape == (num_samples, k)
 
-    def test_rolling_correctness(self):
-        group_size = 7
-        template = np.random.randn(group_size).astype(np.float32)
-        k = 2
-
-        ds = dataset.GroupCompositionDataset(
-            "cn",
-            group_size=group_size,
-            template=template,
-            k=k,
-            mode="exhaustive",
-        )
-
-        shift_0 = int(ds.sequence[0, 0])
-        expected_x0 = np.roll(template, shift_0)
-        np.testing.assert_allclose(ds.X[0, 0, :].numpy(), expected_x0, rtol=1e-5)
-
     def test_getitem(self):
         group_size = 7
+        group = CyclicGroup(N=group_size)
         template = np.random.randn(group_size).astype(np.float32)
         k = 2
 
         ds = dataset.GroupCompositionDataset(
-            "cn",
-            group_size=group_size,
+            group,
             template=template,
             k=k,
             mode="exhaustive",
@@ -108,18 +94,17 @@ class TestGroupCompositionDatasetOfflineCn:
 
 
 class TestGroupCompositionDatasetOfflineCnxcn:
-    """Tests for GroupCompositionDataset with group_name='cnxcn' (offline)."""
+    """Tests for GroupCompositionDataset with ProductCyclicGroup (offline)."""
 
     def test_sampled_shapes(self):
         p1, p2 = 5, 5
-        template = np.random.randn(p1, p2).astype(np.float32)
+        group = ProductCyclicGroup(p1=p1, p2=p2)
+        template = np.random.randn(p1 * p2).astype(np.float32)
         k = 3
         num_samples = 100
 
         ds = dataset.GroupCompositionDataset(
-            "cnxcn",
-            p1=p1,
-            p2=p2,
+            group,
             template=template,
             k=k,
             mode="sampled",
@@ -130,17 +115,16 @@ class TestGroupCompositionDatasetOfflineCnxcn:
         assert len(ds) == num_samples
         assert ds.X.shape == (num_samples, k, group_size)
         assert ds.Y.shape == (num_samples, group_size)
-        assert ds.sequence.shape == (num_samples, k, 2)
+        assert ds.sequence.shape == (num_samples, k)
 
     def test_exhaustive_shapes(self):
         p1, p2 = 3, 3
-        template = np.random.randn(p1, p2).astype(np.float32)
+        group = ProductCyclicGroup(p1=p1, p2=p2)
+        template = np.random.randn(p1 * p2).astype(np.float32)
         k = 2
 
         ds = dataset.GroupCompositionDataset(
-            "cnxcn",
-            p1=p1,
-            p2=p2,
+            group,
             template=template,
             k=k,
             mode="exhaustive",
@@ -151,7 +135,7 @@ class TestGroupCompositionDatasetOfflineCnxcn:
         assert len(ds) == expected_n
         assert ds.X.shape == (expected_n, k, group_size)
         assert ds.Y.shape == (expected_n, group_size)
-        assert ds.sequence.shape == (expected_n, k, 2)
+        assert ds.sequence.shape == (expected_n, k)
 
 
 class TestGroupCompositionDatasetOfflineGroup:
@@ -159,8 +143,6 @@ class TestGroupCompositionDatasetOfflineGroup:
 
     @pytest.fixture
     def d3_group(self):
-        from src.groups import DihedralGroup
-
         return DihedralGroup(N=3)
 
     @pytest.fixture
@@ -174,10 +156,9 @@ class TestGroupCompositionDatasetOfflineGroup:
         group_size = len(template_d3)
 
         ds = dataset.GroupCompositionDataset(
-            "dihedral",
+            d3_group,
             template=template_d3,
             k=k,
-            group=d3_group,
             mode="sampled",
             num_samples=num_samples,
         )
@@ -192,10 +173,9 @@ class TestGroupCompositionDatasetOfflineGroup:
         group_size = len(template_d3)
 
         ds = dataset.GroupCompositionDataset(
-            "dihedral",
+            d3_group,
             template=template_d3,
             k=k,
-            group=d3_group,
             mode="exhaustive",
         )
 
@@ -211,10 +191,9 @@ class TestGroupCompositionDatasetOfflineGroup:
         group_size = len(template_d3)
 
         ds = dataset.GroupCompositionDataset(
-            "dihedral",
+            d3_group,
             template=template_d3,
             k=k,
-            group=d3_group,
             mode="sampled",
             num_samples=num_samples,
             return_all_outputs=True,
@@ -231,19 +210,17 @@ class TestGroupCompositionDatasetOfflineGroup:
 
         with pytest.raises(AssertionError):
             dataset.GroupCompositionDataset(
-                "dihedral",
+                d3_group,
                 template=template,
                 k=2,
-                group=d3_group,
                 mode="exhaustive",
             )
 
     def test_getitem(self, template_d3, d3_group):
         ds = dataset.GroupCompositionDataset(
-            "dihedral",
+            d3_group,
             template=template_d3,
             k=2,
-            group=d3_group,
             mode="exhaustive",
         )
 
@@ -259,14 +236,14 @@ class TestGroupCompositionDatasetOnline:
 
     def test_online_cn_shapes(self):
         group_size = 7
+        group = CyclicGroup(N=group_size)
         k = 3
         batch_size = 16
         template = np.random.randn(group_size).astype(np.float32)
 
         ds = dataset.GroupCompositionDataset(
-            "cn",
+            group,
             online=True,
-            group_size=group_size,
             template=template,
             k=k,
             batch_size=batch_size,
@@ -279,14 +256,14 @@ class TestGroupCompositionDatasetOnline:
 
     def test_online_cn_return_all_outputs(self):
         group_size = 7
+        group = CyclicGroup(N=group_size)
         k = 4
         batch_size = 16
         template = np.random.randn(group_size).astype(np.float32)
 
         ds = dataset.GroupCompositionDataset(
-            "cn",
+            group,
             online=True,
-            group_size=group_size,
             template=template,
             k=k,
             batch_size=batch_size,
@@ -300,15 +277,14 @@ class TestGroupCompositionDatasetOnline:
 
     def test_online_cnxcn_shapes(self):
         p1, p2 = 5, 5
+        group = ProductCyclicGroup(p1=p1, p2=p2)
         k = 3
         batch_size = 16
-        template = np.random.randn(p1, p2).astype(np.float32)
+        template = np.random.randn(p1 * p2).astype(np.float32)
 
         ds = dataset.GroupCompositionDataset(
-            "cnxcn",
+            group,
             online=True,
-            p1=p1,
-            p2=p2,
             template=template,
             k=k,
             batch_size=batch_size,
@@ -322,15 +298,14 @@ class TestGroupCompositionDatasetOnline:
 
     def test_online_cnxcn_return_all_outputs(self):
         p1, p2 = 5, 5
+        group = ProductCyclicGroup(p1=p1, p2=p2)
         k = 4
         batch_size = 16
-        template = np.random.randn(p1, p2).astype(np.float32)
+        template = np.random.randn(p1 * p2).astype(np.float32)
 
         ds = dataset.GroupCompositionDataset(
-            "cnxcn",
+            group,
             online=True,
-            p1=p1,
-            p2=p2,
             template=template,
             k=k,
             batch_size=batch_size,
@@ -344,9 +319,10 @@ class TestGroupCompositionDatasetOnline:
         assert Y.shape == (batch_size, k - 1, group_size)
 
     def test_online_unsupported_group_raises(self):
+        group = DihedralGroup(N=3)
         with pytest.raises(ValueError, match="Online mode only supported"):
             dataset.GroupCompositionDataset(
-                "dihedral",
+                group,
                 online=True,
                 template=np.zeros(6),
                 k=2,

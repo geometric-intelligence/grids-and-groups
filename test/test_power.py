@@ -200,28 +200,36 @@ class TestTopkTemplateFreqs:
         assert top_freqs == []
 
 
-class TestPowersPerNeuronRowsCyclic:
-    """Tests for power.powers_per_neuron_rows_cyclic."""
+class TestPowersPerNeuronRowsCyclicGroup:
+    """Tests for power.powers_per_neuron_rows with CyclicGroup."""
 
-    def test_1d_shape(self):
-        """Each row must produce the correct power shape for C_n."""
+    def test_shape_cn(self):
+        """Each row must produce the correct power shape for CyclicGroup."""
+        from src.groups.cn import CyclicGroup
+
         p = 10
         h = 3
+        group = CyclicGroup(N=p)
         W = np.random.RandomState(1).randn(h, p)
-        out = power.powers_per_neuron_rows_cyclic(W, template_dim=1)
-        assert out.shape == (h, (p // 2) + 1)
+        out = power.powers_per_neuron_rows(W, group)
+        n_irreps = len(group.irreps())
+        assert out.shape == (h, n_irreps)
         for i in range(h):
-            expected, _ = power.get_power_1d(W[i])
-            np.testing.assert_allclose(out[i], expected, rtol=1e-10)
+            np.testing.assert_allclose(out[i], group.power_spectrum(W[i]), rtol=1e-10)
 
-    def test_2d_rectangular_shape(self):
+    def test_shape_cnxcn(self):
+        """Each row must produce the correct power shape for ProductCyclicGroup."""
+        from src.groups.cnxcn import ProductCyclicGroup
+
         p1, p2 = 2, 3
         h = 2
+        group = ProductCyclicGroup(p1=p1, p2=p2)
         W = np.random.RandomState(2).randn(h, p1 * p2)
-        out = power.powers_per_neuron_rows_cyclic(W, template_dim=2, p1=p1, p2=p2)
-        expected_0 = power.get_power_2d(W[0].reshape(p1, p2), no_freq=True)
-        assert out.shape[1] == expected_0.size
-        np.testing.assert_allclose(out[0], expected_0.ravel(), rtol=1e-10)
+        out = power.powers_per_neuron_rows(W, group)
+        n_irreps = len(group.irreps())
+        assert out.shape == (h, n_irreps)
+        for i in range(h):
+            np.testing.assert_allclose(out[i], group.power_spectrum(W[i]), rtol=1e-10)
 
 
 class TestPowersPerNeuronRows:

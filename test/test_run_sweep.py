@@ -160,20 +160,16 @@ class TestGenerateExperimentConfigs:
 
 @pytest.fixture
 def mock_all_plots():
-    """Mock all produce_plots_* and plt.savefig/close to skip visualization."""
+    """Mock produce_plots and plt.savefig/close to skip visualization."""
     import src.main as main  # noqa: F401
 
     with (
-        patch("src.main.produce_plots_cn") as mock_1d,
-        patch("src.main.produce_plots_cnxcn") as mock_2d,
-        patch("src.main.produce_plots_group") as mock_group,
+        patch("src.main.produce_plots") as mock_plots,
         patch("matplotlib.pyplot.savefig") as mock_savefig,
         patch("matplotlib.pyplot.close") as mock_close,
     ):
         yield {
-            "produce_plots_cn": mock_1d,
-            "produce_plots_cnxcn": mock_2d,
-            "produce_plots_group": mock_group,
+            "produce_plots": mock_plots,
             "savefig": mock_savefig,
             "close": mock_close,
         }

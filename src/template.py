@@ -11,100 +11,6 @@ def one_hot(group_size):
     return vec
 
 
-def fixed_cn(group_size, powers):
-    """Generate a template for cyclic group C_n from desired per-mode powers.
-
-    Parameters
-    ----------
-    group_size : int
-        Order of the cyclic group C_{group_size}.
-    powers : list of float
-        Desired spectral power for each frequency mode.
-        Length must equal the number of modes: ``(group_size + 1) // 2``
-        for odd ``group_size``, or ``group_size // 2 + 1`` for even.
-
-    Returns
-    -------
-    template : np.ndarray, shape (group_size,), dtype float32
-        Mean-centered template.
-    """
-    n_modes = (group_size + 1) // 2 if group_size % 2 == 1 else group_size // 2 + 1
-    assert len(powers) == n_modes, (
-        f"powers length {len(powers)} must equal number of frequency modes {n_modes} for group_size={group_size}"
-    )
-
-    fourier_coef_mags = [0.0]
-    for k_mode in range(1, len(powers)):
-        mag = np.sqrt(powers[k_mode] * group_size / 2.0) if powers[k_mode] > 0 else 0.0
-        fourier_coef_mags.append(mag)
-
-    spectrum = np.zeros(group_size, dtype=complex)
-    spectrum[0] = fourier_coef_mags[0]
-
-    for i_mag in range(1, len(fourier_coef_mags)):
-        spectrum[i_mag] = fourier_coef_mags[i_mag]
-        spectrum[-i_mag] = np.conj(fourier_coef_mags[i_mag])
-
-    template = np.fft.ifft(spectrum).real
-    template = template - np.mean(template)
-    template = template.astype(np.float32)
-
-    return template
-
-
-def fixed_cnxcn(p1, p2, powers):
-    """Generate a template for product group C_n x C_n from desired per-mode powers.
-
-    Modes are laid out as ``(1,0), (0,1), (1,1), (2,0), (0,2), (2,2), ...``
-    (i.e. cycling through row-only, col-only, diagonal for each frequency
-    band).
-
-    Parameters
-    ----------
-    p1, p2 : int
-        p1, p2 in C_{p1} x C_{p2}.
-    powers : list of float
-        Desired spectral power for each 2D mode (excluding the DC component,
-        which is always set to zero).
-
-    Returns
-    -------
-    template : np.ndarray, shape (p1 * p2,), dtype float32
-        Mean-centered, flattened template.
-    """
-    group_size = p1 * p2
-
-    fourier_coef_mags = []
-    for pw in powers:
-        mag = np.sqrt(pw * group_size / 2.0) if pw > 0 else 0.0
-        fourier_coef_mags.append(mag)
-
-    spectrum = np.zeros((p1, p2), dtype=complex)
-    spectrum[0, 0] = 0.0
-
-    def mode_selector(i_mag):
-        i_mode = 1 + i_mag // 3
-        mode_type = i_mag % 3
-        if mode_type == 0:
-            return (i_mode, 0)
-        elif mode_type == 1:
-            return (0, i_mode)
-        else:
-            return (i_mode, i_mode)
-
-    for i_mag, mag in enumerate(fourier_coef_mags):
-        mode = mode_selector(i_mag)
-        spectrum[mode[0], mode[1]] = mag
-        spectrum[-mode[0], -mode[1]] = np.conj(mag)
-
-    template = np.fft.ifft2(spectrum).real
-    template = template.flatten()
-    template = template - np.mean(template)
-    template = template.astype(np.float32)
-
-    return template
-
-
 def fixed_group(group, powers):
     """Generate a template for a group from desired per-irrep power values.
 
@@ -152,14 +58,13 @@ def fixed_group(group, powers):
 
 
 def template_selector(config):
-    """Select template based on configuration."""
+    """Select template based on configuration.
+
+    For ``custom_fourier`` templates, uses :func:`fixed_group` with the
+    ``Group`` object stored in ``config["group"]``.
+    """
     if config["template_type"] == "custom_fourier":
-        if config["group_name"] == "cnxcn":
-            template = fixed_cnxcn(config["p1"], config["p2"], config["powers"])
-        elif config["group_name"] == "cn":
-            template = fixed_cn(config["group_n"], config["powers"])
-        else:
-            template = fixed_group(config["group"], config["powers"])
+        template = fixed_group(config["group"], config["powers"])
     elif config["template_type"] == "one_hot":
         template = one_hot(config["group_size"])
     else:

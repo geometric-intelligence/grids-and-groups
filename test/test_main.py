@@ -37,20 +37,16 @@ def temp_run_dir():
 
 @pytest.fixture
 def mock_all_plots():
-    """Mock all produce_plots_* and plt.savefig/close to skip visualization entirely."""
+    """Mock produce_plots and plt.savefig/close to skip visualization entirely."""
     import src.main as main  # noqa: F401
 
     with (
-        patch("src.main.produce_plots_cn") as mock_1d,
-        patch("src.main.produce_plots_cnxcn") as mock_2d,
-        patch("src.main.produce_plots_group") as mock_group,
+        patch("src.main.produce_plots") as mock_plots,
         patch("matplotlib.pyplot.savefig") as mock_savefig,
         patch("matplotlib.pyplot.close") as mock_close,
     ):
         yield {
-            "produce_plots_cn": mock_1d,
-            "produce_plots_cnxcn": mock_2d,
-            "produce_plots_group": mock_group,
+            "produce_plots": mock_plots,
             "savefig": mock_savefig,
             "close": mock_close,
         }
@@ -92,7 +88,7 @@ def test_main_c10(temp_run_dir, mock_all_plots):
     assert "final_train_loss" in results
     assert "final_val_loss" in results
     assert results["final_train_loss"] > 0
-    mock_all_plots["produce_plots_cn"].assert_called_once()
+    mock_all_plots["produce_plots"].assert_called_once()
 
 
 def test_main_c4x4(temp_run_dir, mock_all_plots):
@@ -105,7 +101,7 @@ def test_main_c4x4(temp_run_dir, mock_all_plots):
     assert "final_train_loss" in results
     assert "final_val_loss" in results
     assert results["final_train_loss"] > 0
-    mock_all_plots["produce_plots_cnxcn"].assert_called_once()
+    mock_all_plots["produce_plots"].assert_called_once()
 
 
 def test_main_d3(temp_run_dir, mock_savefig):
@@ -168,12 +164,12 @@ def test_regenerate_plots_cn(temp_run_dir, mock_all_plots):
     config = main.load_config(str(CONFIG_FILES["c10"]))
     main.train_single_run(config, run_dir=temp_run_dir)
 
-    mock_all_plots["produce_plots_cn"].reset_mock()
+    mock_all_plots["produce_plots"].reset_mock()
 
     main.regenerate_plots(str(temp_run_dir), device="cpu")
 
-    mock_all_plots["produce_plots_cn"].assert_called_once()
-    call_kwargs = mock_all_plots["produce_plots_cn"].call_args[1]
+    mock_all_plots["produce_plots"].assert_called_once()
+    call_kwargs = mock_all_plots["produce_plots"].call_args[1]
     mdl = call_kwargs["model"]
     assert isinstance(mdl, main.model.TwoLayerMLP)
     assert mdl.group_size == 10
