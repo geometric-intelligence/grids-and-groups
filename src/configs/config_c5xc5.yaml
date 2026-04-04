@@ -1,8 +1,9 @@
 # ============================================================================
 # Configuration: Product Group C_5 x C_5
 # ============================================================================
-# C5 x C5 has order 25. Uses 2D template with p1=5, p2=5.
-#
+# C5 x C5 has order 25 and 25 irreps (j1,j2) in row-major order.
+# For a real template: power[j1,j2] = power[-j1 % 5, -j2 % 5].
+
 data:
   group_name: cnxcn           # Group family: 'cn' | 'cnxcn' | 'dihedral' | 'octahedral' | 'A5'
   p1: 5                       # First cyclic group order / template height (cnxcn only)
@@ -11,8 +12,14 @@ data:
   batch_size: 128             # Training batch size
   seed: 10                    # Random seed for reproducibility
   template_type: custom_fourier  # Template type: 'mnist' | 'custom_fourier'
-  # Desired power per 2D Fourier mode (modes: (1,0), (0,1), (1,1), (2,0), (0,2))
-  powers: [0, 12, 10, 8, 6, 4] #[200.0, 100.0, 50.0, 10.0, 5.0]
+  # custom_fourier powers (one per irrep, 25 total, row-major (j1,j2))
+  # Non-zero modes: (0,1)/(0,4)=10, (0,2)/(0,3)=4, (1,0)/(4,0)=12,
+  #                 (1,1)/(4,4)=8, (2,0)/(3,0)=6
+  powers: [0, 10, 4, 4, 10,
+           12, 8, 0, 0, 0,
+           6, 0, 0, 0, 0,
+           6, 0, 0, 0, 0,
+           12, 0, 0, 0, 8]
   mode: exhaustive            # Dataset mode: 'sampled' | 'exhaustive'
   num_samples: 1000           # Number of samples (used when mode='sampled')
 

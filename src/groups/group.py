@@ -35,10 +35,6 @@ class Group(ABC):
             ``result[i]`` is the |G| x |G| permutation matrix for element *i*.
         """
 
-    # ------------------------------------------------------------------
-    # Concrete methods built on the abstract interface
-    # ------------------------------------------------------------------
-
     def fourier(self, signal: np.ndarray) -> list[np.ndarray]:
         """Group Fourier Transform.
 
@@ -84,10 +80,16 @@ class Group(ABC):
         return np.array([_at_element(g) for g in range(n)])
 
     def power_spectrum(self, signal: np.ndarray) -> np.ndarray:
-        """Group power spectrum.
+        """Group power spectrum (normalised by ``|G|``).
 
         For each irrep rho the power is::
-            ||hat x(rho)||^2_rho = dim(rho) * Tr( hat_x(rho)^H  @  hat_x(rho) )
+
+            P(rho) = dim(rho) / |G| * Tr( hat_x(rho)^H  @  hat_x(rho) )
+
+        where ``hat_x`` uses the un-normalised Fourier convention
+        ``hat_x = sum_g x(g) rho(g)^H``.  The ``1/|G|`` factor ensures
+        that the returned values match the per-irrep powers passed to
+        :func:`template.custom_fourier`.
 
         Parameters
         ----------
@@ -102,5 +104,5 @@ class Group(ABC):
         ps = np.zeros(len(irreps))
         for i, irrep in enumerate(irreps):
             fc = fourier_coefs[i]
-            ps[i] = irrep.size * np.trace(fc.conj().T @ fc)
+            ps[i] = irrep.size * np.trace(fc.conj().T @ fc) / self.order
         return ps

@@ -17,9 +17,10 @@ from torch.utils.data import DataLoader
 import src.dataset as dataset
 import src.model as model
 import src.optimizer as optimizer
-import src.power as power
 import src.template as template
 import src.viz as viz
+from src.groups import make_group
+from src.groups.cnxcn import ProductCyclicGroup
 
 matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType fonts for PDF viewer compatibility
 matplotlib.rcParams["ps.fonttype"] = 42
@@ -273,7 +274,8 @@ def regenerate_plots(run_dir, device="cpu"):
         param_save_indices = _reconstruct_param_save_indices(config, len(param_hist))
 
     group_name = config["data"]["group_name"]
-    group_size = len(template.flatten())
+    group = make_group(group_name, config)
+    group_size = group.order
     model_type = config["model"]["model_type"]
 
     if model_type == "TwoLayerMLP":
@@ -296,98 +298,57 @@ def regenerate_plots(run_dir, device="cpu"):
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
 
-    training_mode = config["training"]["mode"]
-
-    if group_name == "cnxcn":
-        produce_plots_cnxcn(
-            run_dir=run_dir,
-            config=config,
-            model=mdl,
-            param_hist=param_hist,
-            param_save_indices=param_save_indices,
-            train_loss_hist=train_loss_hist,
-            template_2d=template,
-            training_mode=training_mode,
-            device=device,
-        )
-    elif group_name == "cn":
-        produce_plots_cn(
-            run_dir=run_dir,
-            config=config,
-            model=mdl,
-            param_hist=param_hist,
-            param_save_indices=param_save_indices,
-            train_loss_hist=train_loss_hist,
-            template_1d=template,
-            training_mode=training_mode,
-            device=device,
-        )
-    elif group_name in ("dihedral", "octahedral", "A5"):
-        if group_name == "dihedral":
-            from src.groups import DihedralGroup
-
-            group = DihedralGroup(N=config["data"].get("group_n", 3))
-        elif group_name == "octahedral":
-            from src.groups import OctahedralGroup
-
-            group = OctahedralGroup()
-        else:
-            from src.groups import IcosahedralGroup
-
-            group = IcosahedralGroup()
-        produce_plots_group(
-            run_dir=run_dir,
-            config=config,
-            model=mdl,
-            param_hist=param_hist,
-            param_save_indices=param_save_indices,
-            train_loss_hist=train_loss_hist,
-            template=template,
-            device=device,
-            group=group,
-        )
-    else:
-        raise ValueError(f"Unknown group_name: {group_name}")
+    produce_plots(
+        run_dir=run_dir,
+        config=config,
+        model=mdl,
+        param_hist=param_hist,
+        param_save_indices=param_save_indices,
+        train_loss_hist=train_loss_hist,
+        template=template,
+        device=device,
+        group=group,
+    )
 
     sync_runs_data_cache(run_dir, config)
 
     print(f"\u2713 Plots regenerated for {run_dir}")
 
 
-def produce_plots_cnxcn(
+def produce_plots(
     run_dir: Path,
     config: dict,
     model,
     param_hist,
     param_save_indices,
     train_loss_hist,
-    template_2d: np.ndarray,
-    training_mode: str,
-    device: str,
+    template: np.ndarray,
+    device: str = "cpu",
+    group=None,
 ):
+    """Generate all analysis plots after training for any group.
+
+    Unified replacement for the former ``produce_plots_cn``,
+    ``produce_plots_cnxcn``, and ``produce_plots_group``.  See
+    ``docs/refactoring_notes.md`` for details on the unification.
     """
-    Generate all analysis plots after training (2D only).
+    group_name = config["data"]["group_name"]
+    group_size = group.order
+    k = config["data"]["k"]
+    batch_size = config["data"]["batch_size"]
+    training_mode = config["training"]["mode"]
 
-    Note: This function currently only supports 2D templates with p1 and p2 dimensions.
-    For 1D templates, basic plots are generated separately in train_single_run.
+    # Human-readable label for plot titles
+    _label_map = {
+        "cn": lambda c: f"C{c['data']['p']}",
+        "cnxcn": lambda c: f"C{c['data']['p1']}\u00d7C{c['data']['p2']}",
+        "dihedral": lambda c: f"D{c['data'].get('group_n', 3)} (order {group.order})",
+        "octahedral": lambda _: f"Octahedral (order {group.order})",
+        "A5": lambda _: f"A5 / Icosahedral (order {group.order})",
+    }
+    group_label = _label_map.get(group_name, lambda _: group_name)(config)
 
-    Some plots are model-specific:
-    - W_mix frequency structure: QuadraticRNN only (skipped for TwoLayerMLP)
-    - W_out neuron specialization: All models
-    - Power spectrum, predictions, loss curves: All models
-
-    Args:
-        run_dir: Directory to save plots
-        config: Configuration dictionary (must have dimension=2)
-        model: Trained model (TwoLayerMLP or QuadraticRNN)
-        param_hist: List of parameter snapshots
-        param_save_indices: Indices where params were saved
-        train_loss_hist: Training loss history
-        template_2d: 2D template array (p1, p2)
-        training_mode: 'online' or 'offline'
-        device: Device string ('cpu' or 'cuda')
-    """
-    print("\n=== Generating Analysis Plots ===")
+    print(f"\n=== Generating Analysis Plots ({group_label}) ===")
 
     plots_bool_dict = config.get("analysis", {}).get("plots", {})
     plot_training_loss_bool = plots_bool_dict.get("training_loss", True)
@@ -396,106 +357,82 @@ def produce_plots_cnxcn(
     plot_wmix_bool = plots_bool_dict.get("wmix", True)
     plot_w_dominant_irrep_fraction_bool = plots_bool_dict.get("w_dominant_irrep_fraction", True)
 
-    ### ----- COMPUTE X-AXIS VALUES ----- ###
-    group_name = config["data"]["group_name"]
-    if group_name == "cn":
-        group_size = config["data"]["p"]
-    else:
-        group_size = config["data"]["p1"] * config["data"]["p2"]
-
-    k = config["data"]["k"]
-    batch_size = config["data"]["batch_size"]
+    # X-axis values
     total_space_size = group_size**k
-
-    # Calculate different x-axis values for plotting
     if training_mode == "online":
         steps = np.arange(len(train_loss_hist))
         samples_seen = batch_size * steps
         fraction_of_space = samples_seen / total_space_size
-        x_label_steps = "Step"
-    else:  # offline
+        x_label = "Step"
+        x_values = steps
+    else:
         epochs = np.arange(len(train_loss_hist))
         samples_seen = config["data"]["num_samples"] * epochs
         fraction_of_space = samples_seen / total_space_size
-        x_label_steps = "Epoch"
+        x_label = "Epoch"
+        x_values = epochs
 
-    # Save x-axis data
     np.save(run_dir / "samples_seen.npy", samples_seen)
     np.save(run_dir / "fraction_of_space_seen.npy", fraction_of_space)
 
     print(f"Total data space: {total_space_size:,} sequences")
-    print(f"Samples seen: {samples_seen[-1]:,} ({fraction_of_space[-1] * 100:.4f}% of space)")
+    if len(samples_seen) > 0:
+        print(f"Samples seen: {samples_seen[-1]:,} ({fraction_of_space[-1] * 100:.4f}% of space)")
 
-    ### ----- GENERATE EVALUATION DATA ----- ###
-    print("Generating evaluation data for visualization...")
-    model_type = config["model"]["model_type"]
-
-    eval_ds_2d = dataset.GroupCompositionDataset(
-        "cnxcn",
-        p1=config["data"]["p1"],
-        p2=config["data"]["p2"],
-        template=template_2d,
-        k=config["data"]["k"],
+    # Evaluation dataset
+    print("\nGenerating evaluation data for visualization...")
+    tpl_flat = np.asarray(template).ravel()
+    eval_ds = dataset.GroupCompositionDataset(
+        group,
+        template=tpl_flat,
+        k=k,
         mode="sampled",
         num_samples=min(config["data"].get("num_samples", 1000), 1000),
         return_all_outputs=config["model"]["return_all_outputs"],
     )
-    X_eval_2d_t = eval_ds_2d.X.to(device)
-    Y_eval_2d_t = eval_ds_2d.Y.to(device)
-    print(f"  Generated {len(eval_ds_2d)} samples for visualization")
+    X_eval_t = eval_ds.X.to(device)
+    Y_eval_t = eval_ds.Y.to(device)
+    print(f"  Generated {X_eval_t.shape[0]} samples for visualization")
 
-    ### ----- COMPUTE CHECKPOINT INDICES ----- ###
+    # Checkpoint indices
     total_checkpoints = len(param_hist)
     checkpoint_fractions = config["analysis"]["checkpoints"]
     checkpoint_indices = [int(f * (total_checkpoints - 1)) for f in checkpoint_fractions]
-
     print(f"Analysis checkpoints: {checkpoint_indices} (out of {total_checkpoints})")
-    print(
-        f"  Corresponding to step/epoch indices: {[param_save_indices[i] for i in checkpoint_indices]}"
-    )
 
-    ### ----- PLOT TRAINING LOSS ----- ###
+    # Training loss plots
     if plot_training_loss_bool:
         print("\nPlotting training loss...")
 
-        # Plot 1: Loss vs Steps/Epochs
         viz.plot_train_loss_with_theory(
             loss_history=train_loss_hist,
-            template_2d=template_2d,
-            p1=config["data"]["p1"],
-            p2=config["data"]["p2"],
+            template=template,
+            group=group,
             x_values=None,
-            x_label=x_label_steps,
+            x_label=x_label,
             save_path=os.path.join(run_dir, "training_loss_vs_steps.pdf"),
             show=False,
         )
-
-        # Plot 2: Loss vs Samples Seen
         viz.plot_train_loss_with_theory(
             loss_history=train_loss_hist,
-            template_2d=template_2d,
-            p1=config["data"]["p1"],
-            p2=config["data"]["p2"],
+            template=template,
+            group=group,
             x_values=samples_seen,
             x_label="Samples Seen",
             save_path=os.path.join(run_dir, "training_loss_vs_samples.pdf"),
             show=False,
         )
-
-        # Plot 3: Loss vs Fraction of Space
         viz.plot_train_loss_with_theory(
             loss_history=train_loss_hist,
-            template_2d=template_2d,
-            p1=config["data"]["p1"],
-            p2=config["data"]["p2"],
+            template=template,
+            group=group,
             x_values=fraction_of_space,
             x_label="Samples Seen / Data Space Size",
             save_path=os.path.join(run_dir, "training_loss_vs_fraction.pdf"),
             show=False,
         )
 
-        # Plot 4: 2x2 grid (Linear, Log Y, Log X, Log-Log)
-        x_values = steps if training_mode == "online" else epochs
+        # 2x2 grid (Linear, Log Y, Log X, Log-Log)
         _, axes = plt.subplots(2, 2, figsize=(12, 10))
         scale_configs = [
             ("linear", "linear", "Linear Scale"),
@@ -507,16 +444,13 @@ def produce_plots_cnxcn(
             ax.plot(x_values, train_loss_hist, lw=2, color="#1f77b4")
             ax.set_xscale(xscale)
             ax.set_yscale(yscale)
-            ax.set_xlabel(x_label_steps)
+            ax.set_xlabel(x_label)
             ax.set_ylabel("Training Loss")
             ax.set_title(title)
             ax.grid(True, alpha=0.3)
             if yscale == "log":
                 ax.set_ylim(bottom=1.0)
 
-        p1 = config["data"]["p1"]
-        p2 = config["data"]["p2"]
-        group_label = f"C{p1}\u00d7C{p2}"
         lr = config["training"]["learning_rate"]
         hidden_dim = config["model"]["hidden_dim"]
         init_scale = config["model"]["init_scale"]
@@ -530,530 +464,7 @@ def produce_plots_cnxcn(
         plt.close()
         print(f"  \u2713 Saved {training_loss_path}")
 
-    ### ----- PLOT MODEL PREDICTIONS ----- ###
-    if plot_predictions_bool and model_type != "TwoLayerMLP":
-        print("Plotting model predictions over time...")
-        viz.plot_predictions_2d(
-            model,
-            param_hist,
-            X_eval_2d_t,
-            Y_eval_2d_t,
-            config["data"]["p1"],
-            config["data"]["p2"],
-            steps=checkpoint_indices,
-            save_path=os.path.join(run_dir, "predictions_over_time.pdf"),
-            show=False,
-        )
-
-    ### ----- PLOT POWER SPECTRUM ANALYSIS ----- ###
-    power_data = None
-    if plot_power_spectrum:
-        print("Plotting power spectrum over time...")
-        p1 = config["data"]["p1"]
-        p2 = config["data"]["p2"]
-        optimizer_name = config["training"]["optimizer"]
-        init_scale = config["model"]["init_scale"]
-        group_label = f"C{p1}\u00d7C{p2}"
-        power_data = viz.plot_power_cnxcn(
-            model=model,
-            param_hist=param_hist,
-            param_save_indices=param_save_indices,
-            X_eval=X_eval_2d_t,
-            template_2d=template_2d,
-            p1=p1,
-            p2=p2,
-            k=k,
-            optimizer=optimizer_name,
-            init_scale=init_scale,
-            save_path=os.path.join(run_dir, "power_spectrum_analysis.pdf"),
-            group_label=group_label,
-            learning_rate=config["training"]["learning_rate"],
-            hidden_dim=config["model"]["hidden_dim"],
-        )
-        np.savez(run_dir / "power_data.npz", **power_data)
-
-    ### ----- PLOT COMBINED LOSS, POWER, AND WEIGHT POWER ----- ###
-    weight_power_in_combined = False
-    if plot_training_loss_bool and power_data is not None:
-        print("\nPlotting combined loss, power, and weight power...")
-        x_values = steps if training_mode == "online" else epochs
-        p1 = config["data"]["p1"]
-        p2 = config["data"]["p2"]
-        group_label = f"C{p1}\u00d7C{p2}"
-        weight_kw = (
-            {
-                "param_hist": param_hist,
-                "param_save_indices": param_save_indices,
-                "group_size": p1 * p2,
-                "group_name": "cnxcn",
-                "p1": p1,
-                "p2": p2,
-            }
-            if plot_w_dominant_irrep_fraction_bool
-            else {}
-        )
-        weight_power_in_combined = viz.plot_loss_power_and_weight_power(
-            x_values=x_values,
-            train_loss_hist=train_loss_hist,
-            x_label=x_label_steps,
-            power_data=power_data,
-            save_path=os.path.join(run_dir, "loss_power_and_weight_power.pdf"),
-            title=(
-                f"{group_label} Training"
-                f" (k={k}, lr={config['training']['learning_rate']},"
-                f" init={config['model']['init_scale']:.0e},"
-                f" h={config['model']['hidden_dim']}, {config['training']['optimizer']})"
-            ),
-            **weight_kw,
-        )
-
-    ### ----- PLOT W_MIX FREQUENCY STRUCTURE (QuadraticRNN only) ----- ###
-    if plot_wmix_bool and model_type == "QuadraticRNN":
-        print("Creating Fourier modes reference...")
-        tracked_freqs = power.topk_template_freqs(template_2d, K=10)
-        colors = plt.cm.tab10(np.linspace(0, 1, len(tracked_freqs)))
-        print("Visualizing W_mix frequency structure...")
-        viz.plot_wmix_structure(
-            param_hist,
-            tracked_freqs,
-            colors,
-            config["data"]["p1"],
-            config["data"]["p2"],
-            steps=checkpoint_indices,
-            within_group_size="phase",
-            dead_l2_thresh=0.1,
-            save_path=os.path.join(run_dir, "wmix_frequency_structure.pdf"),
-            show=False,
-        )
-    elif model_type != "QuadraticRNN":
-        print("Skipping W_mix frequency structure plot (not applicable for TwoLayerMLP)")
-
-    ### ----- PLOT W-ROW DOMINANT IRREP FRACTION (TwoLayerMLP / W_out) ----- ###
-    if plot_w_dominant_irrep_fraction_bool and not weight_power_in_combined:
-        print("Plotting W-row dominant irrep fraction over time...")
-        group_size_2d = config["data"]["p1"] * config["data"]["p2"]
-        fig_w = viz.plot_w_dominant_irrep_fraction(
-            param_hist=param_hist,
-            param_save_indices=param_save_indices,
-            group_size=group_size_2d,
-            x_label=x_label_steps,
-            group_name="cnxcn",
-            p1=config["data"]["p1"],
-            p2=config["data"]["p2"],
-            save_path=os.path.join(run_dir, "w_dominant_irrep_fraction.pdf"),
-            show=False,
-        )
-        if fig_w is None:
-            print(
-                "  (skipped w_dominant_irrep_fraction: need W or W_out with shape"
-                f" (hidden, p1*p2) for p1={config['data']['p1']}, p2={config['data']['p2']})"
-            )
-
-    viz.maybe_save_w_dominant_irrep_fraction_npz(
-        run_dir,
-        param_hist,
-        param_save_indices,
-        config,
-        group=None,
-    )
-    print("\n✓ All plots generated successfully!")
-
-
-def produce_plots_cn(
-    run_dir: Path,
-    config: dict,
-    model,
-    param_hist,
-    param_save_indices,
-    train_loss_hist,
-    template_1d: np.ndarray,
-    training_mode: str,
-    device: str,
-):
-    """
-    Generate all analysis plots after training (1D version).
-
-    Args:
-        run_dir: Directory to save plots
-        config: Configuration dictionary (must have dimension=1)
-        model: Trained model (TwoLayerMLP or QuadraticRNN)
-        param_hist: List of parameter snapshots
-        param_save_indices: Indices where params were saved
-        train_loss_hist: Training loss history
-        template_1d: 1D template array (group_size,)
-        training_mode: 'online' or 'offline'
-        device: Device string ('cpu' or 'cuda')
-    """
-    print("\n=== Generating Analysis Plots (1D) ===")
-
-    plots_bool_dict = config.get("analysis", {}).get("plots", {})
-    plot_training_loss_bool = plots_bool_dict.get("training_loss", True)
-    plot_predictions_bool = plots_bool_dict.get("predictions", True)
-    plot_power_spectrum = plots_bool_dict.get("power_spectrum", True)
-    plot_w_dominant_irrep_fraction_bool = plots_bool_dict.get("w_dominant_irrep_fraction", True)
-
-    ### ----- COMPUTE X-AXIS VALUES ----- ###
-    p = config["data"]["p"]
-    k = config["data"]["k"]
-    batch_size = config["data"]["batch_size"]
-    total_space_size = p**k
-
-    # Calculate different x-axis values for plotting
-    if training_mode == "online":
-        steps = np.arange(len(train_loss_hist))
-        samples_seen = batch_size * steps
-        fraction_of_space = samples_seen / total_space_size
-        x_label_steps = "Step"
-    else:  # offline
-        epochs = np.arange(len(train_loss_hist))
-        samples_seen = config["data"]["num_samples"] * epochs
-        fraction_of_space = samples_seen / total_space_size
-        x_label_steps = "Epoch"
-
-    # Save x-axis data
-    np.save(run_dir / "samples_seen.npy", samples_seen)
-    np.save(run_dir / "fraction_of_space_seen.npy", fraction_of_space)
-
-    print(f"Total data space: {total_space_size:,} sequences")
-    print(f"Samples seen: {samples_seen[-1]:,} ({fraction_of_space[-1] * 100:.4f}% of space)")
-
-    model_type = config["model"]["model_type"]
-    template_type = config["data"]["template_type"]
-    use_group_style = model_type == "TwoLayerMLP" and template_type == "custom_fourier"
-
-    ### ----- GENERATE EVALUATION DATA ----- ###
-    print("Generating evaluation data for visualization...")
-
-    if use_group_style:
-        eval_ds = dataset.GroupCompositionDataset(
-            "cn",
-            group_size=config["data"]["p"],
-            template=template_1d,
-            k=config["data"]["k"],
-            mode="exhaustive",
-        )
-        X_eval_t = eval_ds.X.to(device)
-        Y_eval_t = eval_ds.Y.to(device)
-        print(f"  Generated {len(eval_ds)} samples for visualization")
-    else:
-        eval_ds_1d = dataset.GroupCompositionDataset(
-            "cn",
-            group_size=config["data"]["p"],
-            template=template_1d,
-            k=config["data"]["k"],
-            mode="sampled",
-            num_samples=min(config["data"]["num_samples"], 1000),
-            return_all_outputs=config["model"]["return_all_outputs"],
-        )
-        X_seq_1d_t = eval_ds_1d.X.to(device)
-        Y_seq_1d_t = eval_ds_1d.Y.to(device)
-        print(f"  Generated {len(eval_ds_1d)} samples for visualization")
-
-    ### ----- COMPUTE CHECKPOINT INDICES ----- ###
-    total_checkpoints = len(param_hist)
-    checkpoint_fractions = config["analysis"]["checkpoints"]
-    checkpoint_indices = [int(f * (total_checkpoints - 1)) for f in checkpoint_fractions]
-
-    print(f"Analysis checkpoints: {checkpoint_indices} (out of {total_checkpoints})")
-    print(
-        f"  Corresponding to step/epoch indices: {[param_save_indices[i] for i in checkpoint_indices]}"
-    )
-
-    ### ----- PLOT TRAINING LOSS ----- ###
-    if plot_training_loss_bool:
-        print("\nPlotting training loss...")
-
-        _, axes = plt.subplots(2, 2, figsize=(12, 10))
-        x_values = steps if training_mode == "online" else epochs
-
-        scale_configs = [
-            ("linear", "linear", "Linear Scale"),
-            ("linear", "log", "Log Y"),
-            ("log", "linear", "Log X"),
-            ("log", "log", "Log-Log"),
-        ]
-
-        for ax, (xscale, yscale, title) in zip(axes.flat, scale_configs):
-            ax.plot(x_values, train_loss_hist, lw=2, color="#1f77b4")
-            ax.set_xscale(xscale)
-            ax.set_yscale(yscale)
-            ax.set_xlabel(x_label_steps)
-            ax.set_ylabel("Training Loss")
-            ax.set_title(title)
-            ax.grid(True, alpha=0.3)
-        if yscale == "log":
-            ax.set_ylim(bottom=1.0)
-
-    if use_group_style:
-        lr = config["training"]["learning_rate"]
-        hidden_dim = config["model"]["hidden_dim"]
-        init_scale = config["model"]["init_scale"]
-        group_label = f"C{p}"
-        plt.suptitle(
-            f"{group_label} Composition (k={k}, lr={lr}, h={hidden_dim}, init={init_scale:.0e})",
-            fontsize=14,
-        )
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(run_dir, "training_loss.pdf"), bbox_inches="tight", dpi=150)
-        plt.close()
-        print(f"  ✓ Saved {os.path.join(run_dir, 'training_loss.pdf')}")
-
-    ### ----- PLOT MODEL PREDICTIONS ----- ###
-    if not use_group_style:
-        if plot_predictions_bool:
-            print("Plotting model predictions over time...")
-            viz.plot_predictions_1d(
-                model,
-                param_hist,
-                X_seq_1d_t,
-                Y_seq_1d_t,
-                group_size=p,
-                steps=checkpoint_indices,
-                save_path=os.path.join(run_dir, "predictions_over_time.pdf"),
-                show=False,
-            )
-
-    ### ----- PLOT POWER SPECTRUM ANALYSIS ----- ###
-    power_data = None
-    if plot_power_spectrum:
-        print("Plotting power spectrum over time...")
-
-        if use_group_style:
-            optimizer_name = config["training"]["optimizer"]
-            init_scale = config["model"]["init_scale"]
-            group_label = f"C{p}"
-            power_data = viz.plot_power_cn(
-                model=model,
-                param_hist=param_hist,
-                param_save_indices=param_save_indices,
-                X_eval=X_eval_t,
-                template_1d=template_1d,
-                group_size=p,
-                k=k,
-                optimizer=optimizer_name,
-                init_scale=init_scale,
-                save_path=os.path.join(run_dir, "power_spectrum_analysis.pdf"),
-                group_label=group_label,
-                learning_rate=config["training"]["learning_rate"],
-                hidden_dim=config["model"]["hidden_dim"],
-            )
-            np.savez(run_dir / "power_data.npz", **power_data)
-        else:
-            viz.plot_power_1d(
-                model,
-                param_hist,
-                X_seq_1d_t,
-                Y_seq_1d_t,
-                template_1d,
-                group_size=p,
-                loss_history=train_loss_hist,
-                param_save_indices=param_save_indices,
-                num_freqs_to_track=min(10, p // 4),
-                checkpoint_indices=checkpoint_indices,
-                num_samples=100,
-                save_path=os.path.join(run_dir, "power_spectrum_analysis.pdf"),
-                show=False,
-            )
-
-    ### ----- PLOT COMBINED LOSS, POWER, AND WEIGHT POWER ----- ###
-    weight_power_in_combined = False
-    if plot_training_loss_bool and power_data is not None:
-        print("\nPlotting combined loss, power, and weight power...")
-        x_values = steps if training_mode == "online" else epochs
-        group_label = f"C{p}"
-        weight_kw = (
-            {
-                "param_hist": param_hist,
-                "param_save_indices": param_save_indices,
-                "group_size": p,
-                "group_name": "cn",
-            }
-            if plot_w_dominant_irrep_fraction_bool
-            else {}
-        )
-        weight_power_in_combined = viz.plot_loss_power_and_weight_power(
-            x_values=x_values,
-            train_loss_hist=train_loss_hist,
-            x_label=x_label_steps,
-            power_data=power_data,
-            save_path=os.path.join(run_dir, "loss_power_and_weight_power.pdf"),
-            title=(
-                f"{group_label} Training"
-                f" (k={k}, lr={config['training']['learning_rate']},"
-                f" init={config['model']['init_scale']:.0e},"
-                f" h={config['model']['hidden_dim']}, {config['training']['optimizer']})"
-            ),
-            **weight_kw,
-        )
-
-    if plot_w_dominant_irrep_fraction_bool and not weight_power_in_combined:
-        print("Plotting W-row dominant irrep fraction over time...")
-        fig_w = viz.plot_w_dominant_irrep_fraction(
-            param_hist=param_hist,
-            param_save_indices=param_save_indices,
-            group_size=p,
-            x_label=x_label_steps,
-            group_name="cn",
-            save_path=os.path.join(run_dir, "w_dominant_irrep_fraction.pdf"),
-            show=False,
-        )
-        if fig_w is None:
-            print(f"  (skipped w_dominant_irrep_fraction: need W or W_out with second dim {p})")
-
-    viz.maybe_save_w_dominant_irrep_fraction_npz(
-        run_dir,
-        param_hist,
-        param_save_indices,
-        config,
-        group=None,
-    )
-    print(f"\n✓ All C{p} plots generated successfully!")
-
-
-def produce_plots_group(
-    run_dir: Path,
-    config: dict,
-    model,
-    param_hist,
-    param_save_indices,
-    train_loss_hist,
-    template: np.ndarray,
-    device: str = "cpu",
-    group=None,
-):
-    """
-    Generate all analysis plots after training for any group.
-
-    Args:
-        run_dir: Directory to save plots
-        config: Configuration dictionary
-        model: Trained model
-        param_hist: List of parameter snapshots
-        param_save_indices: Indices where params were saved
-        train_loss_hist: Training loss history
-        template: 1D template array of shape (group_size,)
-        device: Device string ('cpu' or 'cuda')
-        group: Group object (required)
-    """
-    group_name = config["data"]["group_name"]
-
-    # Build a human-readable label for plot titles
-    if group_name == "dihedral":
-        n = config["data"].get("group_n", 3)
-        group_label = f"D{n} (Dihedral, order {group.order})"
-    elif group_name == "octahedral":
-        group_label = f"Octahedral (order {group.order})"
-    elif group_name == "A5":
-        group_label = f"A5 / Icosahedral (order {group.order})"
-    else:
-        group_label = group_name
-
-    print(f"\n=== Generating Analysis Plots ({group_label}) ===")
-
-    plots_bool_dict = config.get("analysis", {}).get("plots", {})
-    plot_training_loss_bool = plots_bool_dict.get("training_loss", True)
-    plot_predictions_bool = plots_bool_dict.get("predictions", True)
-    plot_power_spectrum = plots_bool_dict.get("power_spectrum", True)
-    plot_w_dominant_irrep_fraction_bool = plots_bool_dict.get("w_dominant_irrep_fraction", True)
-
-    group_size = group.order
-
-    k = config["data"]["k"]
-    batch_size = config["data"]["batch_size"]
-    training_mode = config["training"]["mode"]
-
-    # Total data space size with k compositions
-    total_space_size = group_size**k
-
-    # Calculate x-axis values
-    if training_mode == "online":
-        steps = np.arange(len(train_loss_hist))
-        samples_seen = batch_size * steps
-        fraction_of_space = samples_seen / total_space_size
-        x_label = "Step"
-        x_values = steps
-    else:  # offline
-        epochs = np.arange(len(train_loss_hist))
-        samples_seen = config["data"]["num_samples"] * epochs
-        fraction_of_space = samples_seen / total_space_size
-        x_label = "Epoch"
-        x_values = epochs
-
-    # Save x-axis data
-    samples_seen_path = run_dir / "samples_seen.npy"
-    fraction_path = run_dir / "fraction_of_space_seen.npy"
-    np.save(samples_seen_path, samples_seen)
-    np.save(fraction_path, fraction_of_space)
-    print(f"  ✓ Saved {samples_seen_path}")
-    print(f"  ✓ Saved {fraction_path}")
-
-    print(f"\n{group_name} group order: {group_size}")
-    print(f"Sequence length k: {k}")
-    print(f"Total data space: {total_space_size:,} sequences")
-    if len(samples_seen) > 0:
-        print(f"Samples seen: {samples_seen[-1]:,} ({fraction_of_space[-1] * 100:.4f}% of space)")
-
-    ### ----- GENERATE EVALUATION DATA ----- ###
-    print("\nGenerating evaluation data for visualization...")
-
-    eval_ds = dataset.GroupCompositionDataset(
-        group_name,
-        template=template,
-        k=k,
-        group=group,
-        mode="sampled",
-        num_samples=min(config["data"].get("num_samples", 1000), 1000),
-        return_all_outputs=config["model"]["return_all_outputs"],
-    )
-    X_eval_t = eval_ds.X.to(device)
-    Y_eval_t = eval_ds.Y.to(device)
-    print(f"  Generated {X_eval_t.shape[0]} samples for visualization")
-
-    ### ----- COMPUTE CHECKPOINT INDICES ----- ###
-    total_checkpoints = len(param_hist)
-    checkpoint_fractions = config["analysis"]["checkpoints"]
-    checkpoint_indices = [int(f * (total_checkpoints - 1)) for f in checkpoint_fractions]
-    print(f"Analysis checkpoints: {checkpoint_indices} (out of {total_checkpoints})")
-
-    ### ----- PLOT TRAINING LOSS ----- ###
-    if plot_training_loss_bool:
-        print("\nPlotting training loss...")
-
-        _, axes = plt.subplots(2, 2, figsize=(12, 10))
-
-        scale_configs = [
-            ("linear", "linear", "Linear Scale"),
-            ("linear", "log", "Log Y"),
-            ("log", "linear", "Log X"),
-            ("log", "log", "Log-Log"),
-        ]
-
-        for ax, (xscale, yscale, title) in zip(axes.flat, scale_configs):
-            ax.plot(x_values, train_loss_hist, lw=2, color="#1f77b4")
-            ax.set_xscale(xscale)
-            ax.set_yscale(yscale)
-            ax.set_xlabel(x_label)
-            ax.set_ylabel("Training Loss")
-            ax.set_title(title)
-            ax.grid(True, alpha=0.3)
-        if yscale == "log":
-            ax.set_ylim(bottom=1.0)
-
-        lr = config["training"]["learning_rate"]
-        hidden_dim = config["model"]["hidden_dim"]
-        init_scale = config["model"]["init_scale"]
-        plt.suptitle(
-            f"{group_label} Composition (k={k}, lr={lr}, h={hidden_dim}, init={init_scale:.0e})",
-            fontsize=14,
-        )
-        plt.tight_layout()
-        training_loss_path = os.path.join(run_dir, "training_loss.pdf")
-        plt.savefig(training_loss_path, bbox_inches="tight", dpi=150)
-        plt.close()
-        print(f"  ✓ Saved {training_loss_path}")
-
-    ### ----- PLOT MODEL PREDICTIONS OVER TIME ----- ###
+    # Predictions
     if plot_predictions_bool:
         print("\nPlotting model predictions over time...")
         viz.plot_predictions_group(
@@ -1066,9 +477,9 @@ def produce_plots_group(
             save_path=os.path.join(run_dir, "predictions_over_time.pdf"),
             group_label=group_label,
         )
-        print(f"  ✓ Saved {os.path.join(run_dir, 'predictions_over_time.pdf')}")
+        print("  \u2713 Saved predictions_over_time.pdf")
 
-    ### ----- PLOT POWER SPECTRUM OVER TIME ----- ###
+    # Power spectrum
     power_data = None
     if plot_power_spectrum:
         print("\nPlotting power spectrum over time...")
@@ -1079,7 +490,7 @@ def produce_plots_group(
             param_hist=param_hist,
             param_save_indices=param_save_indices,
             X_eval=X_eval_t,
-            template=template,
+            template=tpl_flat,
             group=group,
             k=k,
             optimizer=optimizer_name,
@@ -1089,10 +500,10 @@ def produce_plots_group(
             learning_rate=config["training"]["learning_rate"],
             hidden_dim=config["model"]["hidden_dim"],
         )
-        print(f"  ✓ Saved {os.path.join(run_dir, 'power_spectrum_analysis.pdf')}")
+        print("  \u2713 Saved power_spectrum_analysis.pdf")
         np.savez(run_dir / "power_data.npz", **power_data)
 
-    ### ----- PLOT COMBINED LOSS, POWER, AND WEIGHT POWER ----- ###
+    # Combined loss + power + weight power
     weight_power_in_combined = False
     if plot_training_loss_bool and power_data is not None:
         print("\nPlotting combined loss, power, and weight power...")
@@ -1100,8 +511,6 @@ def produce_plots_group(
             {
                 "param_hist": param_hist,
                 "param_save_indices": param_save_indices,
-                "group_size": group_size,
-                "group_name": group_name,
                 "group": group,
             }
             if plot_w_dominant_irrep_fraction_bool
@@ -1122,32 +531,45 @@ def produce_plots_group(
             **weight_kw,
         )
 
+    # W_mix frequency structure (QuadraticRNN + cnxcn only)
+    model_type = config["model"]["model_type"]
+    if plot_wmix_bool and model_type == "QuadraticRNN" and isinstance(group, ProductCyclicGroup):
+        print("Visualizing W_mix frequency structure...")
+        tracked_freqs = viz.topk_template_freqs(
+            np.asarray(template).reshape(group._p1, group._p2), K=10
+        )
+        colors = plt.cm.tab10(np.linspace(0, 1, len(tracked_freqs)))
+        viz.plot_wmix_structure(
+            param_hist,
+            tracked_freqs,
+            colors,
+            group._p1,
+            group._p2,
+            steps=checkpoint_indices,
+            within_group_size="phase",
+            dead_l2_thresh=0.1,
+            save_path=os.path.join(run_dir, "wmix_frequency_structure.pdf"),
+            show=False,
+        )
+
+    # W-row dominant irrep fraction
     if plot_w_dominant_irrep_fraction_bool and not weight_power_in_combined:
-        print("\nPlotting W-row dominant irrep fraction over time...")
+        print("Plotting W-row dominant irrep fraction over time...")
         fig_w = viz.plot_w_dominant_irrep_fraction(
             param_hist=param_hist,
             param_save_indices=param_save_indices,
-            group_size=group_size,
-            x_label=x_label,
-            group_name=group_name,
             group=group,
+            x_label=x_label,
             save_path=os.path.join(run_dir, "w_dominant_irrep_fraction.pdf"),
             show=False,
         )
         if fig_w is None:
             print(
-                "  (skipped w_dominant_irrep_fraction: need W or W_out with second dim"
-                f" {group_size} matching group order)"
+                f"  (skipped w_dominant_irrep_fraction: need W or W_out with second dim {group_size})"
             )
 
-    viz.maybe_save_w_dominant_irrep_fraction_npz(
-        run_dir,
-        param_hist,
-        param_save_indices,
-        config,
-        group=group,
-    )
-    print(f"\n✓ All {group_label} plots generated successfully!")
+    viz.maybe_save_w_dominant_irrep_fraction_npz(run_dir, param_hist, param_save_indices, group)
+    print(f"\n\u2713 All {group_label} plots generated successfully!")
 
 
 def train_single_run(config: dict, run_dir: Path = None) -> dict:
@@ -1174,141 +596,55 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
     device = config["device"] if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    ### ----- GENERATE DATA ----- ###
     print("Generating data...")
 
     group_name = config["data"]["group_name"]
-    group_n = config["data"].get("group_n")  # For dihedral groups (D3, D4, etc.)
     template_type = config["data"]["template_type"]
+    group = make_group(group_name, config)
+    group_size = group.order
 
-    if group_name == "cn":
-        # 1D template generation
-        p = config["data"]["p"]
-        group_size = p
+    print(f"Group: {group_name}, order {group_size}")
+    print(f"Irrep dimensions: {[ir.size for ir in group.irreps()]}")
 
-        if template_type == "mnist":
-            template_1d = template.mnist_1d(p, config["data"]["mnist_label"], root="data")
-        elif template_type == "gaussian":
-            template_1d = template.gaussian_1d(p, n_gaussians=3, seed=config["data"]["seed"])
-        elif template_type == "onehot":
-            template_1d = template.onehot_1d(p)
-        elif template_type == "custom_fourier":
-            powers = config["data"]["powers"]
-            print("Template type: custom_fourier")
-            print(f"Desired powers (per freq mode): {powers}")
-            template_1d = template.fixed_cn(p, powers)
-        else:
-            raise ValueError(f"Unknown template_type: {template_type}")
+    # Template generation -- special-purpose templates first, then custom_fourier via group
+    if template_type == "mnist" and group_name == "cn":
+        tpl = template.mnist_1d(config["data"]["p"], config["data"]["mnist_label"], root="data")
+    elif template_type == "mnist" and group_name == "cnxcn":
+        p1, p2 = config["data"]["p1"], config["data"]["p2"]
+        tpl = template.mnist_2d(p1, p2, config["data"]["mnist_label"], root="data")
+    elif template_type == "onehot":
+        tpl = template.one_hot(group_size)
+    elif template_type == "custom_fourier":
+        tpl = template.custom_fourier(group, config["data"]["powers"])
+        print(f"Template type: custom_fourier, powers={config['data']['powers']}")
+    else:
+        raise ValueError(f"Unknown template_type: {template_type}")
 
-        template_1d = template_1d - np.mean(template_1d)
-        tpl = template_1d  # For consistency in code below
+    tpl = np.asarray(tpl, dtype=np.float32)
+    tpl = tpl - np.mean(tpl)
 
-        # Visualize 1D template
-        if config.get("analysis", {}).get("plots", {}).get("template", True):
-            print("Visualizing template...")
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(template_1d)
-            ax.set_xlabel("Position")
-            ax.set_ylabel("Value")
-            ax.set_title("1D Template")
-            ax.grid(True, alpha=0.3)
-            fig.savefig(os.path.join(run_dir, "template.pdf"), bbox_inches="tight", dpi=150)
-            plt.close(fig)
-            print("  ✓ Saved template")
-
-    elif group_name == "cnxcn":
-        # 2D template generation
-        p1 = config["data"]["p1"]
-        p2 = config["data"]["p2"]
-        group_size = p1 * p2
-
-        if template_type == "mnist":
-            template_2d = template.mnist_2d(p1, p2, config["data"]["mnist_label"], root="data")
-        elif template_type == "custom_fourier":
-            assert p1 == p2, f"custom_fourier for cnxcn requires p1 == p2, got p1={p1}, p2={p2}"
-            powers = config["data"]["powers"]
-            print("Template type: custom_fourier")
-            print(f"Desired powers (per 2D mode): {powers}")
-            tpl_flat = template.fixed_cnxcn(p1, p2, powers)
-            template_2d = tpl_flat.reshape(p1, p2)
-        else:
-            raise ValueError(f"Unknown template_type for cnxcn: {template_type}")
-
-        template_2d = template_2d - np.mean(template_2d)
-        tpl = template_2d  # For consistency in code below
-
-        # Visualize 2D template
-        if config.get("analysis", {}).get("plots", {}).get("template", True):
-            print("Visualizing template...")
-            fig, ax = viz.plot_signal_2d(template_2d, title="Template", cmap="gray")
-            fig.savefig(os.path.join(run_dir, "template.pdf"), bbox_inches="tight", dpi=150)
-            plt.close(fig)
-            print("  ✓ Saved template")
-    elif group_name in ("dihedral", "octahedral", "A5"):
-        if group_name == "dihedral":
-            from src.groups import DihedralGroup
-
-            n = group_n if group_n is not None else 3
-            group = DihedralGroup(N=n)
-            group_label = f"Dihedral D{n}"
-        elif group_name == "octahedral":
-            from src.groups import OctahedralGroup
-
-            group = OctahedralGroup()
-            group_label = "Octahedral"
-        elif group_name == "A5":
-            from src.groups import IcosahedralGroup
-
-            group = IcosahedralGroup()
-            group_label = "Icosahedral (A5)"
-
-        group_size = group.order
-
-        print(f"{group_label} group order: {group_size}")
-        print(f"{group_label} irreps: {[irrep.size for irrep in group.irreps()]} (dimensions)")
-
-        # Generate template
-        if template_type == "onehot":
-            tpl = np.zeros(group_size, dtype=np.float32)
-            tpl[1] = 10.0
-            tpl = tpl - np.mean(tpl)
-            print("Template type: onehot")
-
-        elif template_type == "custom_fourier":
-            powers = config["data"]["powers"]
-            print("Template type: custom_fourier")
-            print(f"Desired powers (per irrep): {powers}")
-            tpl = template.fixed_group(group, powers)
-        else:
-            raise ValueError(
-                f"Unknown template_type for {group_name}: {template_type}. "
-                "Must be 'onehot' or 'custom_fourier'"
+    # Visualize template
+    if config.get("analysis", {}).get("plots", {}).get("template", True):
+        print("Visualizing template...")
+        if isinstance(group, ProductCyclicGroup):
+            fig, ax = viz.plot_signal_2d(
+                tpl.reshape(group._p1, group._p2), title="Template", cmap="gray"
             )
-
-        print(f"Template shape: {tpl.shape}")
-
-        # Visualize template
-        if config.get("analysis", {}).get("plots", {}).get("template", True):
-            print("Visualizing template...")
+        else:
             fig, ax = plt.subplots(figsize=(max(8, group_size // 5), 4))
-            ax.bar(range(group_size), tpl)
+            if group_size <= 30:
+                ax.bar(range(group_size), tpl.ravel())
+                ax.set_xticks(range(group_size))
+            else:
+                ax.plot(tpl.ravel())
             ax.set_xlabel("Group element index")
             ax.set_ylabel("Value")
-            title = f"{group_label} Template (order={group_size}, type={template_type})"
-            if template_type == "custom_fourier":
-                title += f"\npowers={powers}"
-            ax.set_title(title)
-            if group_size <= 30:
-                ax.set_xticks(range(group_size))
-            fig.savefig(os.path.join(run_dir, "template.pdf"), bbox_inches="tight", dpi=150)
-            plt.close(fig)
-            print("  ✓ Saved template")
-    else:
-        raise ValueError(
-            f"group_name must be 'cn', 'cnxcn', 'dihedral', 'octahedral', or 'A5', got {group_name}"
-        )
+            ax.set_title(f"{group_name} Template (order={group_size})")
+            ax.grid(True, alpha=0.3)
+        fig.savefig(os.path.join(run_dir, "template.pdf"), bbox_inches="tight", dpi=150)
+        plt.close(fig)
+        print("  \u2713 Saved template")
 
-    ### ----- SETUP TRAINING ----- ###
     print("Setting up model and training...")
 
     model_type = config["model"]["model_type"]
@@ -1371,27 +707,22 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
             f"Invalid optimizer: {optimizer_name}. Must be 'adam', 'hybrid', or 'per_neuron'"
         )
 
-    ### ----- CREATE DATA LOADERS ----- ###
     training_mode = config["training"]["mode"]
+    tpl_flat = tpl.ravel()
 
     if training_mode == "online":
         print("Using ONLINE data generation...")
 
         online_kwargs = dict(
+            template=tpl_flat,
             k=config["data"]["k"],
             batch_size=config["data"]["batch_size"],
             device=device,
             return_all_outputs=config["model"]["return_all_outputs"],
         )
-        if group_name == "cn":
-            online_kwargs.update(group_size=config["data"]["p"], template=template_1d)
-        elif group_name == "cnxcn":
-            online_kwargs.update(
-                p1=config["data"]["p1"], p2=config["data"]["p2"], template=template_2d
-            )
 
-        train_dataset = dataset.GroupCompositionDataset(group_name, online=True, **online_kwargs)
-        val_dataset = dataset.GroupCompositionDataset(group_name, online=True, **online_kwargs)
+        train_dataset = dataset.GroupCompositionDataset(group, online=True, **online_kwargs)
+        val_dataset = dataset.GroupCompositionDataset(group, online=True, **online_kwargs)
 
         train_loader = DataLoader(train_dataset, batch_size=None, num_workers=0)
         val_loader = DataLoader(val_dataset, batch_size=None, num_workers=0)
@@ -1404,23 +735,18 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
         from torch.utils.data import TensorDataset
 
         ds_kwargs = dict(
+            template=tpl_flat,
             k=config["data"]["k"],
             mode=config["data"]["mode"],
             num_samples=config["data"]["num_samples"],
             return_all_outputs=config["model"]["return_all_outputs"],
         )
-        if group_name == "cn":
-            ds_kwargs.update(group_size=config["data"]["p"], template=tpl)
-        elif group_name == "cnxcn":
-            ds_kwargs.update(p1=config["data"]["p1"], p2=config["data"]["p2"], template=tpl)
-        elif group_name in ("dihedral", "octahedral", "A5"):
-            ds_kwargs.update(template=tpl, group=group)
 
-        train_ds = dataset.GroupCompositionDataset(group_name, **ds_kwargs)
+        train_ds = dataset.GroupCompositionDataset(group, **ds_kwargs)
 
         val_samples = max(1000, config["data"]["num_samples"] // 10)
         val_kwargs = {**ds_kwargs, "mode": "sampled", "num_samples": val_samples}
-        val_ds = dataset.GroupCompositionDataset(group_name, **val_kwargs)
+        val_ds = dataset.GroupCompositionDataset(group, **val_kwargs)
 
         X_train_t = train_ds.X.to(device)
         Y_train_t = train_ds.Y.to(device)
@@ -1451,7 +777,6 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
     else:
         raise ValueError(f"Invalid training mode: {training_mode}. Must be 'online' or 'offline'")
 
-    ### ----- TRAIN MODEL ----- ###
     print(f"Starting training in {training_mode} mode...")
 
     # Get optional early stopping threshold
@@ -1520,7 +845,6 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
         status = "CONVERGED" if stopped_early else "DID NOT CONVERGE"
         print(f"  Status: {status} at step/epoch {final_step}")
 
-    ### ----- SAVE RESULTS ----- ###
     metadata = save_results(
         run_dir,
         config,
@@ -1535,49 +859,17 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
         save_param_snapshots=save_param_snapshots,
     )
 
-    ### ----- PRODUCE ALL PLOTS ----- ###
-    if group_name == "cnxcn":
-        # Produce detailed plots for 2D
-        produce_plots_cnxcn(
-            run_dir=run_dir,
-            config=config,
-            model=net,
-            param_hist=param_hist,
-            param_save_indices=param_save_indices,
-            train_loss_hist=train_loss_hist,
-            template_2d=template_2d,
-            training_mode=training_mode,
-            device=device,
-        )
-    elif group_name == "cn":
-        # Produce detailed plots for 1D
-        produce_plots_cn(
-            run_dir=run_dir,
-            config=config,
-            model=net,
-            param_hist=param_hist,
-            param_save_indices=param_save_indices,
-            train_loss_hist=train_loss_hist,
-            template_1d=template_1d,
-            training_mode=training_mode,
-            device=device,
-        )
-    elif group_name in ("dihedral", "octahedral", "A5"):
-        produce_plots_group(
-            run_dir=run_dir,
-            config=config,
-            model=net,
-            param_hist=param_hist,
-            param_save_indices=param_save_indices,
-            train_loss_hist=train_loss_hist,
-            template=tpl,
-            device=device,
-            group=group,
-        )
-    else:
-        raise ValueError(
-            f"group_name must be 'cn', 'cnxcn', 'dihedral', 'octahedral', or 'A5', got {group_name}"
-        )
+    produce_plots(
+        run_dir=run_dir,
+        config=config,
+        model=net,
+        param_hist=param_hist,
+        param_save_indices=param_save_indices,
+        train_loss_hist=train_loss_hist,
+        template=tpl,
+        device=device,
+        group=group,
+    )
 
     # Return results dictionary
     results = {
@@ -1747,7 +1039,6 @@ def make_combined_plot(groups=None):
     if groups is None:
         groups = list(GROUP_CONFIG_MAP.keys())
 
-    # --- Planning pass: classify each group ---
     RUNS_DATA = Path("runs_data")
     REGEN_SECONDS = 120
     PLOT_SECONDS = 10
@@ -1785,7 +1076,6 @@ def make_combined_plot(groups=None):
             {"group": g, "action": "train", "run_dir": None, "est_sec": est + REGEN_SECONDS}
         )
 
-    # --- Print plan ---
     total_est = sum(p["est_sec"] for p in plan) + PLOT_SECONDS
     print("\n" + "=" * 60)
     print("COMBINED PLOT PLAN")
@@ -1810,7 +1100,6 @@ def make_combined_plot(groups=None):
     print(f"\nEstimated total time: {time_str}")
     print("=" * 60)
 
-    # --- Execution pass ---
     run_dirs = []
     group_labels = []
     for p in plan:

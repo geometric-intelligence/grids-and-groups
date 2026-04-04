@@ -120,9 +120,9 @@ The repository includes preconfigured experiments for eight groups:
 
 | Group | Config | Order | k | Architecture |
 |:------|:-------|:-----:|:-:|:-------------|
-| Cyclic $C_{10}$ | `config_c10_k3.yaml` | 10 | 3 | SequentialMLP |
+| Cyclic $C_{10}$ | `config_c10_k3.yaml` | 10 | 3 | TwoLayerMLP |
 | Cyclic $C_{11}$ | `config_c11.yaml` | 11 | 2 | TwoLayerMLP |
-| Product $C_4 \times C_4$ | `config_c4x4_k3.yaml` | 16 | 3 | SequentialMLP |
+| Product $C_4 \times C_4$ | `config_c4x4_k3.yaml` | 16 | 3 | TwoLayerMLP |
 | Product $C_5 \times C_5$ | `config_c5xc5.yaml` | 25 | 2 | TwoLayerMLP |
 | Dihedral $D_3$ | `config_d3.yaml` | 6 | 2 | TwoLayerMLP |
 | Dihedral $D_5$ | `config_d5.yaml` | 10 | 2 | TwoLayerMLP |
@@ -169,8 +169,8 @@ Key parameters in the YAML config files:
 |:----------|:--------|:------------|
 | `data.group_name` | `cn`, `cnxcn`, `dihedral`, `octahedral`, `A5` | Group to learn |
 | `data.k` | integer | Number of elements to compose |
-| `data.template_type` | `custom_fourier`, `onehot`, `mnist`, `gaussian` | Template generation method |
-| `model.model_type` | `QuadraticRNN`, `SequentialMLP`, `TwoLayerMLP` | Architecture |
+| `data.template_type` | `custom_fourier`, `onehot`, `mnist` | Template generation method |
+| `model.model_type` | `QuadraticRNN`, `TwoLayerMLP` | Architecture |
 | `model.hidden_dim` | integer | Hidden layer size |
 | `model.init_scale` | float | Weight initialization scale |
 | `training.optimizer` | `auto`, `adam`, `per_neuron`, `hybrid` | Optimizer (`auto` recommended) |
@@ -209,15 +209,22 @@ training:
 group-agf/
 ├── src/                          # Source code
 │   ├── main.py                   # Training entry point (CLI)
-│   ├── model.py                  # TwoLayerMLP, QuadraticRNN, SequentialMLP
+│   ├── model.py                  # TwoLayerMLP, QuadraticRNN
 │   ├── optimizer.py              # PerNeuronScaledSGD, HybridRNNOptimizer
 │   ├── dataset.py                # Dataset generation and loading
 │   ├── template.py               # Template construction functions
-│   ├── fourier.py                # Group Fourier transforms
-│   ├── power.py                  # Power spectrum computation
-│   ├── viz.py                    # Plotting and visualization
+│   ├── viz.py                    # Plotting, visualization, and power spectrum helpers
 │   ├── train.py                  # Training loops (offline and online)
 │   ├── run_sweep.py              # Parameter sweep runner
+│   ├── sweep_analysis.py         # Sweep result loading and analysis
+│   ├── groups/                   # Finite group implementations
+│   │   ├── group.py              # Abstract Group base class (Fourier, power spectrum)
+│   │   ├── cn.py                 # CyclicGroup (C_n)
+│   │   ├── cnxcn.py              # ProductCyclicGroup (C_n × C_m)
+│   │   ├── dn.py                 # DihedralGroup (D_n)
+│   │   ├── oh.py                 # OctahedralGroup (O_h)
+│   │   ├── a5.py                 # AlternatingGroup (A_5 / icosahedral)
+│   │   └── irrep.py              # IrreducibleRepresentation helper
 │   ├── configs/                  # Group-specific configurations
 │   │   └── config_*.yaml
 ├── runs_data/                    # Precomputed data for combined plot (Figure 1)
@@ -241,48 +248,44 @@ group-agf/
 |:------|:------------|:------|
 | **TwoLayerMLP** | Two-layer feedforward network with configurable nonlinearity (square, relu, tanh, gelu) | Flattened binary pair `(N, 2 * group_size)` |
 | **QuadraticRNN** | Recurrent network: `h_t = (W_mix h_{t-1} + W_drive x_t)^2` | Sequence `(N, k, p)` |
-| **SequentialMLP** | Feedforward MLP with k-th power activation, permutation-invariant for commutative groups | Sequence `(N, k, p)` |
 
 ### `optimizer.py` -- Custom Optimizers
 
 | Optimizer | Description | Recommended for |
 |:----------|:------------|:----------------|
-| **PerNeuronScaledSGD** | SGD with per-neuron learning rate scaling exploiting model homogeneity | SequentialMLP, TwoLayerMLP |
+| **PerNeuronScaledSGD** | SGD with per-neuron learning rate scaling exploiting model homogeneity | TwoLayerMLP |
 | **HybridRNNOptimizer** | Scaled SGD for MLP weights + Adam for recurrent weights | QuadraticRNN |
 | Adam (PyTorch built-in) | Standard Adam | QuadraticRNN |
 
+### `groups/` -- Finite Group Implementations
+
+- **`Group`** (abstract base class) -- defines the interface (`order`, `elements`, `irreps`, `regular_rep`) and provides concrete Fourier analysis methods: `fourier`, `inverse_fourier`, `power_spectrum`
+- **`CyclicGroup`** ($C_n$), **`ProductCyclicGroup`** ($C_n \times C_m$), **`DihedralGroup`** ($D_n$), **`OctahedralGroup`** ($O_h$), **`AlternatingGroup`** ($A_5$)
+
 ### `dataset.py` -- Data Generation
 
-- **Online datasets**: `OnlineModularAdditionDataset1D`, `OnlineModularAdditionDataset2D` -- generate samples on-the-fly (GPU-accelerated) via `__iter__`
-- **Offline composition**: `OfflineModularCompositionDataset(Dataset)` -- PyTorch map-style dataset with classmethod constructors: `from_group` (any escnn group via its regular representation), `from_cn` (cyclic C_p), `from_cnxcn` (product C_{p1} x C_{p2}); all support arbitrary sequence length `k`, sampled/exhaustive mode, and `return_all_outputs`; supports `__len__` / `__getitem__` for use with `DataLoader`
+- **`GroupCompositionDataset`** -- PyTorch map-style dataset for offline group composition; supports arbitrary sequence length `k`, sampled/exhaustive mode, and `return_all_outputs`
+- **`_OnlineModularAdditionDataset1D`**, **`_OnlineModularAdditionDataset2D`** -- generate samples on-the-fly (GPU-accelerated) via `__iter__`
 
 ### `template.py` -- Template Construction
 
-- **Group templates**: `one_hot`, `fixed_cn`, `fixed_cnxcn`, `fixed_group`
-- **1D synthetic**: `fourier_1d`, `gaussian_1d`, `onehot_1d`
-- **2D synthetic**: `gaussian_mixture_2d`, `unique_freqs_2d`, `fixed_2d`, `hexagon_tie_2d`, `ring_isotropic_2d`, `gaussian_2d`
-- **MNIST-based**: `mnist`, `mnist_1d`, `mnist_2d`
+- `one_hot` -- one-hot encoding with zeroth frequency removed
+- `custom_fourier` -- template from desired per-irrep power values
+- `make_template` -- config-driven template factory (dispatches to the above)
+- `mnist_1d`, `mnist_2d` -- templates derived from MNIST images
 
-### `fourier.py` -- Group Fourier Transforms
+### `viz.py` -- Visualization and Power Spectrum Helpers
 
-- `group_fourier(group, template)` -- Fourier coefficients via irreducible representations
-- `group_fourier_inverse(group, fourier_coefs)` -- reconstruct template from Fourier coefficients
-
-### `power.py` -- Power Spectrum Analysis
-
-- `GroupPower` -- power spectrum of a template over any `escnn` group
-- `CyclicPower` -- specialized for cyclic groups via FFT
-- `model_power_over_time` -- track how the model's learned power spectrum evolves during training
-- `theoretical_loss_levels_1d`, `_2d` -- predict staircase loss plateaus from template power
-
-### `viz.py` -- Visualization
-
-Plotting functions for training analysis: `plot_train_loss_with_theory`, `plot_predictions_1d`, `plot_predictions_2d`, `plot_predictions_group`, `plot_power_1d`, `plot_power_group`, `plot_wmix_structure`, `plot_irreps`, and more.
+Plotting and analysis functions for training: `plot_train_loss_with_theory`, `plot_predictions_group`, `plot_power_group`, `plot_wmix_structure`, `plot_irreps`, `plot_combined_loss_and_power`, `plot_loss_power_and_weight_power`, and more. Also includes power spectrum helpers moved from the former `power.py`: `loss_plateau_predictions`, `powers_per_neuron_rows`, `model_power_over_time`, `topk_template_freqs`.
 
 ### `train.py` -- Training Loops
 
 - `train(model, loader, criterion, optimizer, ...)` -- epoch-based offline training
 - `train_online(model, loader, criterion, optimizer, ...)` -- step-based online training
+
+### `sweep_analysis.py` -- Sweep Result Analysis
+
+Utilities for loading, aggregating, and plotting parameter sweep results: `load_sweep_results_grid`, `load_training_loss_curves`, `export_lightweight_data`, `plot_theory_boundaries`.
 
 </details>
 

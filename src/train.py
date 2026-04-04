@@ -74,7 +74,6 @@ def train(
         train_loss_history, val_loss_history, param_history = [], [], []
         param_save_epochs = []
 
-        # --- BEFORE TRAINING (epoch 0) ---
         model.eval()
         with torch.no_grad():
             if eval_dataloader is not None:
@@ -103,7 +102,6 @@ def train(
 
     final_epoch = epochs
 
-    # --- TRAINING LOOP (epochs 1..epochs) ---
     for epoch in range(1, epochs + 1):
         model.train()
         running = 0.0

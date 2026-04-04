@@ -39,10 +39,6 @@ class CyclicGroup(Group):
     def regular_rep(self) -> np.ndarray:
         return self._regular
 
-    # ------------------------------------------------------------------
-    # Fast FFT overrides
-    # ------------------------------------------------------------------
-
     def fourier(self, signal: np.ndarray) -> list[np.ndarray]:
         """DFT-based group Fourier transform for cyclic groups."""
         return [irrep_mat for irrep_mat in [np.array([[coef]]) for coef in np.fft.fft(signal)]]
@@ -58,11 +54,7 @@ class CyclicGroup(Group):
         Returns one power value per frequency bin (same count as irreps = N).
         """
         ft = np.fft.fft(signal)
-        return np.abs(ft) ** 2
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+        return np.abs(ft) ** 2 / self._N
 
     def _build_irreps(self) -> list[IrreducibleRepresentation]:
         N = self._N

@@ -3,11 +3,213 @@ from pathlib import Path
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from matplotlib.ticker import MaxNLocator
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+from src.groups.cn import CyclicGroup
+from src.groups.cnxcn import ProductCyclicGroup
+
+
+def _independent_irrep_indices(group):
+    """Return irrep indices that are not conjugate duplicates.
+
+    For ``CyclicGroup(N)`` the independent modes are ``0, 1, …, N//2``
+    (the rest satisfy ``power[k] = power[N-k]``).
+
+    For ``ProductCyclicGroup(p1, p2)`` one representative is kept from
+    each ``{(j1, j2), ((-j1)%p1, (-j2)%p2)}`` pair (the one with the
+    smaller row-major index).
+
+    For all other groups every irrep is independent and all indices are
+    returned.
+    """
+    if isinstance(group, CyclicGroup):
+        N = group.order
+        return list(range(N // 2 + 1))
+
+    if isinstance(group, ProductCyclicGroup):
+        p1, p2 = group._p1, group._p2
+        seen = set()
+        result = []
+        for j1 in range(p1):
+            for j2 in range(p2):
+                idx = j1 * p2 + j2
+                conj_idx = ((-j1) % p1) * p2 + ((-j2) % p2)
+                if conj_idx not in seen:
+                    seen.add(idx)
+                    result.append(idx)
+        return result
+
+    return list(range(len(group.irreps())))
+
+
+def loss_plateau_predictions(template, group):
+    """Compute theoretical MSE loss plateau predictions for a group template.
+
+    Uses ``group.power_spectrum`` (which already normalises by ``|G|``) to
+    obtain per-irrep power, then returns cumulative sums in descending power
+    order scaled by ``1/|G|`` (the MSE averaging factor).
+
+    Parameters
+    ----------
+    template : np.ndarray, shape (group.order,)
+        The template array (mean-centered).
+    group : Group
+        A group instance with a ``power_spectrum`` method and an ``order``
+        property.
+
+    Returns
+    -------
+    list of float
+        Theoretical loss plateau predictions (one per non-zero power
+        component, in descending-power order).  The first element is the
+        initial MSE loss (before any learning).
+    """
+    template = np.asarray(template).ravel()
+    p = group.order
+    power = group.power_spectrum(template)
+
+    nonzero_mask = power > 1e-20
+    power = power[nonzero_mask]
+    power = np.sort(power)[::-1]
+
+    coef = 1 / p
+    return [coef * np.sum(power[k:]) for k in range(len(power))]
+
+
+def powers_per_neuron_rows(W: np.ndarray, group) -> np.ndarray:
+    """Irrep power spectrum for each row of ``W`` using ``group.power_spectrum``.
+
+    Each row is treated as a real signal on ``group`` (length ``group.order``).
+
+    Replaces the former ``powers_per_neuron_rows_cyclic`` which used
+    ``np.fft.rfft`` / ``np.fft.rfft2``.  The absolute scale differs by a
+    factor of ``|G|`` (group convention vs normalized FFT), but all
+    downstream consumers (dominant-mode fraction plots) use *ratios*, so
+    this is transparent.
+
+    Parameters
+    ----------
+    W : ndarray, shape (hidden_dim, group.order)
+    group : Group
+        Must match the group structure of the weight rows.
+
+    Returns
+    -------
+    ndarray, shape (hidden_dim, len(group.irreps()))
+        ``out[h, i]`` is the irrep power at index ``i`` for hidden unit ``h``.
+    """
+    if W.ndim != 2:
+        raise ValueError(f"W must be 2-D, got shape {W.shape}")
+    if W.shape[1] != group.order:
+        raise ValueError(f"W.shape[1] ({W.shape[1]}) must equal group.order ({group.order})")
+    hidden = W.shape[0]
+    n_irreps = len(group.irreps())
+    out = np.empty((hidden, n_irreps))
+    for h in range(hidden):
+        out[h] = group.power_spectrum(W[h])
+    return out
+
+
+def model_power_over_time(group, model, param_history, model_inputs):
+    """Compute the power spectrum of the model's learned outputs over time.
+
+    Replaces the former version that branched on ``group_name`` (``"cn"`` /
+    ``"cnxcn"`` / else).  Now uses ``group.power_spectrum`` uniformly.
+
+    Parameters
+    ----------
+    group : Group
+        The group object.
+    model : nn.Module
+        The trained model.
+    param_history : list of dict
+        State-dict snapshots at each saved training step.
+    model_inputs : torch.Tensor
+        Input data tensor (a small evaluation batch).
+
+    Returns
+    -------
+    powers_over_time : ndarray, shape (num_steps, n_irreps)
+        Average output power spectrum at each sampled step.
+    steps : ndarray of int
+        The param_history indices that were sampled.
+    """
+    n_irreps = len(group.irreps())
+
+    model.eval()
+    with torch.no_grad():
+        test_output = model(model_inputs[:1])
+    output_dim = test_output.shape[-1]
+
+    num_points = 200
+    max_step = len(param_history) - 1
+    num_inputs = max(1, len(model_inputs) // 50)
+    X_tensor = model_inputs[:num_inputs]
+
+    if max_step <= 1:
+        steps = np.arange(max_step + 1)
+    else:
+        steps = np.unique(np.logspace(1, np.log10(max_step), num_points, dtype=int))
+        steps = steps[steps > 50]
+        steps = np.hstack([np.linspace(1, min(50, max_step), 5).astype(int), steps])
+    steps = np.unique(steps)
+    steps = steps[steps <= max_step]
+
+    powers_over_time = np.zeros([len(steps), n_irreps])
+
+    for i_step, step in enumerate(steps):
+        model.load_state_dict(param_history[step])
+        model.eval()
+        with torch.no_grad():
+            outputs = model(X_tensor)
+            outputs_arr = outputs.detach().cpu().numpy().reshape(-1, output_dim)
+
+            if i_step % 10 == 0:
+                print("Computing power at step", step, "with output shape", outputs_arr.shape)
+
+            powers = []
+            for out in outputs_arr:
+                one_power = group.power_spectrum(out.flatten())
+                powers.append(one_power.flatten())
+            powers = np.array(powers)
+
+            average_power = np.mean(powers, axis=0)
+            powers_over_time[i_step, :] = average_power
+
+    powers_over_time = np.array(powers_over_time)
+    powers_over_time[powers_over_time < 1e-20] = 0
+
+    return powers_over_time, steps
+
+
+def topk_template_freqs(template_2d: np.ndarray, K: int, min_power: float = 1e-20):
+    """Return top-K (kx, ky) FFT2 bins by power for a 2D template.
+
+    Parameters
+    ----------
+    template_2d : np.ndarray, shape (p1, p2)
+        The 2D template array.
+    K : int
+        Number of top frequency bins to return.
+    min_power : float
+        Minimum power threshold for a bin to be considered.
+
+    Returns
+    -------
+    list of tuple
+        Top-K (kx, ky) frequency index pairs sorted by descending power.
+    """
+    F = np.fft.fft2(template_2d)
+    pwr = (F.conj() * F).real
+    shp = pwr.shape
+    flat = pwr.ravel()
+    mask = flat > min_power
+    if not np.any(mask):
+        return []
+    top_idx = np.flatnonzero(mask)[np.argsort(flat[mask])[::-1]][:K]
+    kx, ky = np.unravel_index(top_idx, shp)
+    return list(zip(kx.tolist(), ky.tolist()))
 
 
 def style_axes(ax, numyticks=5, numxticks=5, labelsize=24):
@@ -110,11 +312,8 @@ def _training_loss_log_y_floor(ax):
 
 
 def _theory_loss_y_levels_from_run(run_dir: Path, cfg: dict) -> list[float] | None:
-    """Template MSE plateau levels via loss_plateau_predictions functions.
-
-    Uses ``loss_plateau_predictions_cyclic`` / ``loss_plateau_predictions_group``.
-    """
-    import src.power as power
+    """Template MSE plateau levels via ``loss_plateau_predictions``."""
+    from src.groups import make_group
 
     tpl_path = run_dir / "template.npy"
     if not tpl_path.exists():
@@ -123,31 +322,13 @@ def _theory_loss_y_levels_from_run(run_dir: Path, cfg: dict) -> list[float] | No
     template_np = np.load(tpl_path)
     gn = cfg["data"]["group_name"]
 
-    if gn == "cn":
-        t_flat = np.asarray(template_np).ravel()
-        out = power.loss_plateau_predictions_cyclic(t_flat, template_dim=1)
-    elif gn == "cnxcn":
-        p1, p2 = cfg["data"]["p1"], cfg["data"]["p2"]
-        t_flat = np.asarray(template_np).ravel()
-        out = power.loss_plateau_predictions_cyclic(t_flat, template_dim=2, p1=p1, p2=p2)
-    elif gn in ("dihedral", "octahedral", "A5"):
-        if gn == "dihedral":
-            from src.groups import DihedralGroup
-
-            group = DihedralGroup(N=cfg["data"].get("group_n", 3))
-        elif gn == "octahedral":
-            from src.groups import OctahedralGroup
-
-            group = OctahedralGroup()
-        else:
-            from src.groups import IcosahedralGroup
-
-            group = IcosahedralGroup()
-        t = np.asarray(template_np).ravel()
-        out = power.loss_plateau_predictions_group(t, group)
-    else:
+    try:
+        group = make_group(gn, cfg)
+    except (ValueError, KeyError):
         return None
 
+    t = np.asarray(template_np).ravel()
+    out = loss_plateau_predictions(t, group)
     return list(out) if out else None
 
 
@@ -255,8 +436,6 @@ def analyze_wout_frequency_dominance(state_dict, tracked_freqs, p1, p2):
         dom_power: Power at dominant frequency for each neuron
         l2: L2 norm of each neuron's weights
     """
-    import src.power as power
-
     Wo = state_dict["W_out"].detach().cpu().numpy()  # (p, H)
     W = Wo.T  # (H, p)
     H, D = W.shape
@@ -271,7 +450,7 @@ def analyze_wout_frequency_dominance(state_dict, tracked_freqs, p1, p2):
         m = W[j].reshape(p1, p2)
         F = np.fft.fft2(m)
         P = (F.conj() * F).real
-        tp = [power._tracked_power_from_fft2(P, kx, ky, p1, p2) for (kx, ky) in tracked_freqs]
+        tp = [P[kx % p1, ky % p2] for (kx, ky) in tracked_freqs]
         jj = int(np.argmax(tp))
         dom_idx[j] = jj
         i0, j0 = tracked_freqs[jj][0] % p1, tracked_freqs[jj][1] % p2
@@ -279,11 +458,6 @@ def analyze_wout_frequency_dominance(state_dict, tracked_freqs, p1, p2):
         dom_pow[j] = tp[jj]
 
     return dom_idx, phase, dom_pow, l2
-
-
-# ---------------------------------------------------------------------------
-# Plotting functions
-# ---------------------------------------------------------------------------
 
 
 def plot_signal_2d(
@@ -305,21 +479,19 @@ def plot_signal_2d(
 
 
 def plot_train_loss_with_theory(
-    loss_history, template_2d, p1, p2, x_values=None, x_label="Step", save_path=None, show=True
+    loss_history, template, group, x_values=None, x_label="Step", save_path=None, show=True
 ):
     """Plot training loss with theoretical power spectrum lines.
 
-    Args:
-        loss_history: List of loss values
-        template_2d: The 2D template array (p1, p2)
-        p1, p2: Dimensions
-        x_values: X-axis values (if None, uses indices 0, 1, 2, ...)
-        x_label: Label for x-axis (e.g., "Samples Seen", "Fraction of Space")
-        save_path: Optional path to save figure
-        show: Whether to display the plot
+    Parameters
+    ----------
+    loss_history : list of float
+    template : np.ndarray
+        Template array (any shape; will be flattened).
+    group : Group
+        Group object used for plateau prediction.
+    x_values, x_label, save_path, show : optional
     """
-    import src.power as power
-
     fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 
     if x_values is None:
@@ -327,9 +499,7 @@ def plot_train_loss_with_theory(
 
     ax.plot(x_values, loss_history, lw=4, color="#1f77b4", label="Training Loss")
 
-    for y in power.loss_plateau_predictions_cyclic(
-        template_2d.ravel(), template_dim=2, p1=p1, p2=p2
-    ):
+    for y in loss_plateau_predictions(template.ravel(), group):
         ax.axhline(y=y, color="black", linestyle="--", linewidth=2, zorder=-2)
 
     ax.set_xlabel(x_label, fontsize=24)
@@ -352,188 +522,73 @@ def plot_train_loss_with_theory(
     return fig, ax
 
 
-def plot_predictions_2d(
+def plot_predictions_group(
     model,
-    param_history,
-    X_data,
-    Y_data,
-    p1,
-    p2,
-    steps=None,
-    example_idx=None,
-    cmap="gray",
-    save_path=None,
-    show=False,
+    param_hist,
+    X_eval,
+    Y_eval,
+    group_size: int,
+    checkpoint_indices: list,
+    save_path: str = None,
+    num_samples: int = 5,
+    group_label: str = "Group",
 ):
-    """Plot model predictions at different training steps vs ground truth (2D).
+    """Plot model predictions vs targets at different training checkpoints.
 
-    Args:
-        model: The trained model
-        param_history: List of parameter snapshots from training
-        X_data: Input tensor (N, k, p1*p2)
-        Y_data: Target tensor (N, p1*p2)
-        p1, p2: Dimensions
-        steps: List of epoch indices to plot
-        example_idx: Index of example to visualize
-        cmap: Colormap to use
-        save_path: Path to save figure
-        show: Whether to display the plot
+    Replaces the former ``plot_predictions_1d``, ``plot_predictions_2d``,
+    and ``plot_predictions_group``.  Uses a bar-chart representation that
+    works for any group order.
     """
     import torch
 
-    if steps is None:
-        final_step = len(param_history) - 1
-        steps = [1, min(5, final_step), min(10, final_step), final_step]
-        steps = sorted(list(set(steps)))
+    n_checkpoints = len(checkpoint_indices)
 
-    if example_idx is None:
-        example_idx = int(np.random.randint(len(Y_data)))
+    fig, axes = plt.subplots(
+        num_samples, n_checkpoints, figsize=(4 * n_checkpoints, 3 * num_samples)
+    )
+    if num_samples == 1:
+        axes = axes.reshape(1, -1)
+    if n_checkpoints == 1:
+        axes = axes.reshape(-1, 1)
 
-    device = next(model.parameters()).device
-    model.to(device).eval()
-
-    if Y_data.dim() == 3:
-        Y_data = Y_data[:, -1, :]
-    with torch.no_grad():
-        truth_2d = Y_data[example_idx].reshape(p1, p2).cpu().numpy()
-
-    preds = []
-    for step in steps:
-        model.load_state_dict(param_history[step], strict=True)
-        with torch.no_grad():
-            x = X_data[example_idx : example_idx + 1].to(device)
-            pred_2d = model(x)
-            if pred_2d.dim() == 3:
-                pred_2d = pred_2d[:, -1, :]
-            pred_2d = pred_2d.reshape(p1, p2).detach().cpu().numpy()
-            preds.append(pred_2d)
-
-    vmin = np.min(truth_2d)
-    vmax = np.max(truth_2d)
-
-    fig, axes = plt.subplots(2, len(steps), figsize=(3.5 * len(steps), 6), layout="constrained")
-    if len(steps) == 1:
-        axes = axes.reshape(2, 1)
-
-    for col, (step, pred_2d) in enumerate(zip(steps, preds)):
-        im = axes[0, col].imshow(pred_2d, vmin=vmin, vmax=vmax, cmap=cmap, origin="upper")
-        axes[0, col].set_title(f"Epoch {step}", fontsize=12)
-        axes[0, col].set_xticks([])
-        axes[0, col].set_yticks([])
-
-        axes[1, col].imshow(truth_2d, vmin=vmin, vmax=vmax, cmap=cmap, origin="upper")
-        axes[1, col].set_xticks([])
-        axes[1, col].set_yticks([])
-
-    axes[0, 0].set_ylabel("Prediction", fontsize=14)
-    axes[1, 0].set_ylabel("Target", fontsize=14)
-
-    fig.colorbar(im, ax=axes, location="right", shrink=0.9, pad=0.02).set_label(
-        "Value", fontsize=12
+    sample_indices = np.random.choice(
+        len(X_eval), size=min(num_samples, len(X_eval)), replace=False
     )
 
-    if save_path:
-        plt.savefig(save_path, bbox_inches="tight", dpi=150)
-        print(f"  ✓ Saved predictions plot to {save_path}")
+    for col, ckpt_idx in enumerate(checkpoint_indices):
+        model.load_state_dict(param_hist[ckpt_idx])
+        model.eval()
 
-    if show:
-        plt.show()
-    else:
-        plt.close()
-
-    return fig, axes
-
-
-def plot_predictions_1d(
-    model,
-    param_history,
-    X_data,
-    Y_data,
-    group_size,
-    steps=None,
-    example_idx=None,
-    save_path=None,
-    show=False,
-):
-    """Plot model predictions at different training steps vs ground truth (1D).
-
-    Args:
-        model: The trained model
-        param_history: List of parameter snapshots from training
-        X_data: Input tensor (N, k, group_size)
-        Y_data: Target tensor (N, group_size)
-        group_size: Dimension of the group
-        steps: List of epoch indices to plot
-        example_idx: Index of example to visualize
-        save_path: Path to save figure
-        show: Whether to display the plot
-    """
-    import torch
-
-    if steps is None:
-        final_step = len(param_history) - 1
-        steps = [1, min(5, final_step), min(10, final_step), final_step]
-        steps = sorted(list(set(steps)))
-
-    if example_idx is None:
-        example_idx = int(np.random.randint(len(Y_data)))
-
-    device = next(model.parameters()).device
-    model.to(device).eval()
-
-    if Y_data.dim() == 3:
-        Y_data = Y_data[:, -1, :]
-    with torch.no_grad():
-        truth_1d = Y_data[example_idx].cpu().numpy()
-
-    preds = []
-    for step in steps:
-        model.load_state_dict(param_history[step], strict=True)
         with torch.no_grad():
-            x = X_data[example_idx : example_idx + 1].to(device)
-            pred = model(x)
-            if pred.dim() == 3:
-                pred = pred[:, -1, :]
-            pred_1d = pred.squeeze().detach().cpu().numpy()
-            preds.append(pred_1d)
+            outputs = model(X_eval[sample_indices])
+            outputs_np = outputs.cpu().numpy()
+            targets_np = Y_eval[sample_indices].cpu().numpy()
 
-    fig, axes = plt.subplots(2, len(steps), figsize=(3.5 * len(steps), 4), layout="constrained")
-    if len(steps) == 1:
-        axes = axes.reshape(2, 1)
+        for row, (output, target) in enumerate(zip(outputs_np, targets_np)):
+            ax = axes[row, col]
+            x_axis = np.arange(group_size)
 
-    x = np.arange(group_size)
+            ax.bar(x_axis - 0.15, target, width=0.3, label="Target", alpha=0.7, color="#2ecc71")
+            ax.bar(x_axis + 0.15, output, width=0.3, label="Output", alpha=0.7, color="#e74c3c")
 
-    for col, (step, pred_1d) in enumerate(zip(steps, preds)):
-        axes[0, col].plot(x, pred_1d, "b-", lw=2)
-        axes[0, col].set_title(f"Epoch {step}", fontsize=12)
-        axes[0, col].set_ylim(
-            truth_1d.min() - 0.1 * np.abs(truth_1d.min()),
-            truth_1d.max() + 0.1 * np.abs(truth_1d.max()),
-        )
-        axes[0, col].set_xticks([])
-        axes[0, col].grid(True, alpha=0.3)
+            if row == 0:
+                ax.set_title(f"Checkpoint {ckpt_idx}")
+            if col == 0:
+                ax.set_ylabel(f"Sample {sample_indices[row]}")
+            if row == num_samples - 1:
+                ax.set_xlabel("Group element")
+            if row == 0 and col == n_checkpoints - 1:
+                ax.legend(loc="upper right", fontsize=8)
 
-        axes[1, col].plot(x, truth_1d, "k-", lw=2)
-        axes[1, col].set_ylim(
-            truth_1d.min() - 0.1 * np.abs(truth_1d.min()),
-            truth_1d.max() + 0.1 * np.abs(truth_1d.max()),
-        )
-        axes[1, col].set_xticks([])
-        axes[1, col].grid(True, alpha=0.3)
+            ax.set_xticks(x_axis)
+            ax.grid(True, alpha=0.3)
 
-    axes[0, 0].set_ylabel("Prediction", fontsize=14)
-    axes[1, 0].set_ylabel("Target", fontsize=14)
+    plt.suptitle(f"{group_label} Predictions vs Targets Over Training", fontsize=14)
+    plt.tight_layout()
 
     if save_path:
         plt.savefig(save_path, bbox_inches="tight", dpi=150)
-        print(f"  ✓ Saved predictions plot to {save_path}")
-
-    if show:
-        plt.show()
-    else:
-        plt.close()
-
-    return fig, axes
+    plt.close()
 
 
 def _hidden_by_group_weights_from_state_dict(sd: dict) -> np.ndarray | None:
@@ -583,53 +638,29 @@ def mode_colors_aligned_with_power_plot(
 def compute_w_dominant_irrep_fraction_data(
     param_hist: list,
     param_save_indices: list | np.ndarray,
-    group_size: int,
-    group_name: str,
-    group=None,
-    p1: int | None = None,
-    p2: int | None = None,
+    group,
     num_points: int = 1000,
     active_energy_thresh: float = 1e-4,
 ) -> dict | None:
-    """Compute per-neuron dominant-mode fraction curves (same math as ``plot_w_dominant_irrep_fraction``).
+    """Compute per-neuron dominant-mode fraction curves.
+
+    Uses ``powers_per_neuron_rows(W, group)`` uniformly for all groups.
+    Replaces the former version that branched on ``group_name in ("cn","cnxcn")``.
 
     Returns a dict suitable for :func:`save_w_dominant_irrep_fraction_npz` and
     :func:`draw_w_dominant_irrep_fraction_ax`, or ``None`` if not applicable.
     """
-    import src.power as power
-
-    if not param_hist:
+    if not param_hist or group is None:
         return None
 
-    use_cyclic = group_name in ("cn", "cnxcn")
-    if not use_cyclic and group is None:
-        return None
-    if group_name == "cnxcn" and (p1 is None or p2 is None):
-        return None
-
+    group_size = group.order
     W0 = _hidden_by_group_weights_from_state_dict(param_hist[0])
-    if W0 is None:
-        return None
-    if W0.shape[1] != group_size:
-        return None
-    if use_cyclic:
-        if group_name == "cnxcn" and group_size != p1 * p2:
-            return None
-    elif group_size != group.order:
+    if W0 is None or W0.shape[1] != group_size:
         return None
 
     hidden_dim = W0.shape[0]
-
-    if use_cyclic:
-        if group_name == "cn":
-            probe = power.powers_per_neuron_rows_cyclic(W0[:1], template_dim=1)
-        else:
-            probe = power.powers_per_neuron_rows_cyclic(W0[:1], template_dim=2, p1=p1, p2=p2)
-        n_modes = probe.shape[1]
-        ylabel = r"Fraction in final dominant mode ($E_{\mathrm{dom}}/\max_t E_{\mathrm{tot}}$)"
-    else:
-        n_modes = len(group.irreps())
-        ylabel = r"Fraction in final dominant irrep ($E_{\mathrm{dom}}/\max_t E_{\mathrm{tot}}$)"
+    n_modes = len(group.irreps())
+    ylabel = r"Fraction in final dominant irrep ($E_{\mathrm{dom}}/\max_t E_{\mathrm{tot}}$)"
 
     n_snap = len(param_hist)
     max_idx = max(0, n_snap - 1)
@@ -644,13 +675,7 @@ def compute_w_dominant_irrep_fraction_data(
         W = _hidden_by_group_weights_from_state_dict(param_hist[step])
         if W is None or W.shape != (hidden_dim, group_size):
             return None
-        if use_cyclic:
-            if group_name == "cn":
-                row_powers = power.powers_per_neuron_rows_cyclic(W, template_dim=1)
-            else:
-                row_powers = power.powers_per_neuron_rows_cyclic(W, template_dim=2, p1=p1, p2=p2)
-        else:
-            row_powers = power.powers_per_neuron_rows(W, group)
+        row_powers = powers_per_neuron_rows(W, group)
         W_power_over_time.append(row_powers)
 
     W_power_over_time = np.array(W_power_over_time)
@@ -717,39 +742,13 @@ def maybe_save_w_dominant_irrep_fraction_npz(
     run_dir: str | Path,
     param_hist: list,
     param_save_indices: list | np.ndarray,
-    config: dict,
-    group=None,
+    group,
 ) -> bool:
     """Compute and save ``w_dominant_irrep_fraction.npz`` when the model has group readout weights."""
     run_dir = Path(run_dir)
-    gn = config["data"]["group_name"]
-    if gn == "cn":
-        group_size = config["data"]["p"]
-        data = compute_w_dominant_irrep_fraction_data(
-            param_hist, param_save_indices, group_size, "cn"
-        )
-    elif gn == "cnxcn":
-        p1, p2 = config["data"]["p1"], config["data"]["p2"]
-        data = compute_w_dominant_irrep_fraction_data(
-            param_hist,
-            param_save_indices,
-            p1 * p2,
-            "cnxcn",
-            p1=p1,
-            p2=p2,
-        )
-    elif gn in ("dihedral", "octahedral", "A5"):
-        if group is None:
-            return False
-        data = compute_w_dominant_irrep_fraction_data(
-            param_hist,
-            param_save_indices,
-            group.order,
-            gn,
-            group=group,
-        )
-    else:
+    if group is None:
         return False
+    data = compute_w_dominant_irrep_fraction_data(param_hist, param_save_indices, group)
     if data is None:
         return False
     out = run_dir / "w_dominant_irrep_fraction.npz"
@@ -759,13 +758,11 @@ def maybe_save_w_dominant_irrep_fraction_npz(
 
 
 def load_w_dominant_irrep_fraction_for_run_dir(run_dir: str | Path) -> dict | None:
-    """Load ``w_dominant_irrep_fraction.npz`` from *run_dir*, or compute from ``param_history.pt`` + config.
-
-    Used by :func:`plot_combined_loss_and_power`. Requires ``param_save_indices.npy`` when falling
-    back to raw checkpoints (same as power plots).
-    """
+    """Load ``w_dominant_irrep_fraction.npz`` from *run_dir*, or compute from ``param_history.pt`` + config."""
     import torch
     import yaml
+
+    from src.groups import make_group
 
     run_dir = Path(run_dir)
     npz = run_dir / "w_dominant_irrep_fraction.npz"
@@ -783,44 +780,12 @@ def load_w_dominant_irrep_fraction_for_run_dir(run_dir: str | Path) -> dict | No
     param_hist = torch.load(ph_path, map_location="cpu", weights_only=False)
     param_save_indices = np.load(psi_path).tolist()
 
-    gn = config["data"]["group_name"]
-    if gn == "cn":
-        group_size = config["data"]["p"]
-        return compute_w_dominant_irrep_fraction_data(
-            param_hist, param_save_indices, group_size, "cn"
-        )
-    if gn == "cnxcn":
-        p1, p2 = config["data"]["p1"], config["data"]["p2"]
-        return compute_w_dominant_irrep_fraction_data(
-            param_hist,
-            param_save_indices,
-            p1 * p2,
-            "cnxcn",
-            p1=p1,
-            p2=p2,
-        )
-    if gn == "dihedral":
-        from src.groups import DihedralGroup
-
-        group = DihedralGroup(N=config["data"].get("group_n", 3))
-    elif gn == "octahedral":
-        from src.groups import OctahedralGroup
-
-        group = OctahedralGroup()
-    elif gn == "A5":
-        from src.groups import IcosahedralGroup
-
-        group = IcosahedralGroup()
-    else:
+    try:
+        group = make_group(config["data"]["group_name"], config)
+    except (ValueError, KeyError):
         return None
 
-    return compute_w_dominant_irrep_fraction_data(
-        param_hist,
-        param_save_indices,
-        group.order,
-        gn,
-        group=group,
-    )
+    return compute_w_dominant_irrep_fraction_data(param_hist, param_save_indices, group)
 
 
 def draw_w_dominant_irrep_fraction_ax(
@@ -886,12 +851,8 @@ def draw_w_dominant_irrep_fraction_ax(
 def plot_w_dominant_irrep_fraction(
     param_hist: list,
     param_save_indices: list[int],
-    group_size: int,
+    group,
     x_label: str,
-    group_name: str,
-    group=None,
-    p1: int | None = None,
-    p2: int | None = None,
     save_path: str | None = None,
     show: bool = False,
     num_points: int = 1000,
@@ -961,11 +922,7 @@ def plot_w_dominant_irrep_fraction(
     data = compute_w_dominant_irrep_fraction_data(
         param_hist,
         param_save_indices,
-        group_size,
-        group_name,
-        group=group,
-        p1=p1,
-        p2=p2,
+        group,
         num_points=num_points,
         active_energy_thresh=active_energy_thresh,
     )
@@ -996,456 +953,6 @@ def plot_w_dominant_irrep_fraction(
         plt.close()
 
     return fig
-
-
-def plot_power_1d(
-    model,
-    param_history,
-    X_data,
-    Y_data,
-    template_1d,
-    group_size,
-    loss_history,
-    param_save_indices=None,
-    num_freqs_to_track=10,
-    checkpoint_indices=None,
-    num_samples=100,
-    save_path=None,
-    show=False,
-):
-    """Plot training loss with power spectrum analysis of predictions over time (1D).
-
-    Creates a two-panel plot:
-    - Top: Training loss with colored bands for theory lines
-    - Bottom: Power in tracked frequencies over time
-
-    Args:
-        model: The trained model
-        param_history: List of parameter snapshots
-        X_data: Input tensor (N, k, group_size)
-        Y_data: Target tensor (N, group_size)
-        template_1d: The 1D template array (group_size,)
-        group_size: Dimension of the group
-        loss_history: List of loss values
-        param_save_indices: List of step/epoch numbers where params were saved
-        num_freqs_to_track: Number of top frequencies to track
-        checkpoint_indices: (deprecated/unused)
-        num_samples: Number of samples to average for power computation
-        save_path: Path to save figure
-        show: Whether to display the plot
-    """
-    import torch
-    from matplotlib.ticker import FormatStrFormatter
-    from tqdm import tqdm
-
-    import src.power as power
-
-    device = next(model.parameters()).device
-
-    tracked_freqs = power.topk_template_freqs_1d(template_1d, K=num_freqs_to_track)
-    template_power, _ = power.get_power_1d(template_1d)
-    target_powers = {k: template_power[k] for k in tracked_freqs}
-
-    T = len(param_history)
-    steps_analysis = list(range(len(param_history)))
-
-    if param_save_indices is not None:
-        actual_steps = param_save_indices
-    else:
-        actual_steps = list(range(len(param_history)))
-
-    powers_over_time = {freq: [] for freq in tracked_freqs}
-
-    print(f"  Analyzing {len(steps_analysis)} checkpoints for power spectrum (1D)...")
-
-    with torch.no_grad():
-        for step in tqdm(steps_analysis, desc="  Computing power spectra", leave=False):
-            model.load_state_dict(param_history[step], strict=True)
-            model.eval()
-
-            outputs_flat = model(X_data[:num_samples].to(device)).detach().cpu().numpy()
-
-            powers_batch = []
-            for i in range(outputs_flat.shape[0]):
-                if outputs_flat.ndim == 3:
-                    out_1d = outputs_flat[i, -1, :]
-                else:
-                    out_1d = outputs_flat[i]
-                power_i, _ = power.get_power_1d(out_1d)
-                powers_batch.append(power_i)
-            avg_power = np.mean(powers_batch, axis=0)
-
-            for k in tracked_freqs:
-                powers_over_time[k].append(avg_power[k])
-
-    for freq in tracked_freqs:
-        powers_over_time[freq] = np.array(powers_over_time[freq])
-
-    if param_save_indices is None:
-        loss_epochs = np.arange(len(param_history))
-        loss_history_subset = loss_history
-    else:
-        loss_epochs = np.array(param_save_indices)
-        loss_history_subset = [loss_history[i] for i in param_save_indices]
-
-    colors = plt.cm.tab10(np.linspace(0, 1, len(tracked_freqs)))
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10), sharex=True)
-    fig.subplots_adjust(left=0.12, right=0.98, top=0.96, bottom=0.10, hspace=0.12)
-
-    ax1.plot(loss_epochs, loss_history_subset, lw=4, color="#1f77b4", label="Training Loss")
-
-    y_levels = np.array(
-        power.loss_plateau_predictions_cyclic(np.asarray(template_1d).ravel(), template_dim=1),
-        dtype=float,
-    )
-
-    n_bands = max(0, min(len(tracked_freqs), len(y_levels) - 1)) if len(y_levels) else 0
-    for i in range(n_bands):
-        y_top = y_levels[i]
-        y_bot = y_levels[i + 1]
-        ax1.axhspan(y_bot, y_top, facecolor=colors[i], alpha=0.15, zorder=-3)
-
-    for y in y_levels[: n_bands + 1]:
-        ax1.axhline(y=y, color="black", linestyle="--", linewidth=2, zorder=-2)
-
-    ax1.set_ylabel("Theory Loss Levels", fontsize=20)
-    if len(y_levels):
-        ax1.set_ylim(y_levels[n_bands], y_levels[0] * 1.1)
-    style_axes(ax1)
-    ax1.grid(False)
-    ax1.tick_params(labelbottom=False)
-
-    for i, k in enumerate(tracked_freqs):
-        ax2.plot(actual_steps, powers_over_time[k], color=colors[i], lw=3, label=f"k={k}")
-        ax2.axhline(
-            target_powers[k],
-            color=colors[i],
-            linestyle="dotted",
-            linewidth=2,
-            alpha=0.5,
-        )
-
-    ax2.set_xlabel("Steps", fontsize=20)
-    ax2.set_ylabel("Power in Prediction", fontsize=20)
-    ax2.grid(True, alpha=0.3)
-    ax2.legend(fontsize=10, loc="best", ncol=2)
-    style_axes(ax2)
-    ax2.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
-
-    if save_path:
-        plt.savefig(save_path, bbox_inches="tight", dpi=150)
-        print(f"  ✓ Saved power spectrum plot to {save_path}")
-
-    if show:
-        plt.show()
-    else:
-        plt.close()
-
-    return fig, (ax1, ax2), powers_over_time, tracked_freqs
-
-
-def plot_power_cn(
-    model,
-    param_hist,
-    param_save_indices,
-    X_eval,
-    template_1d: np.ndarray,
-    group_size: int,
-    k: int,
-    optimizer: str,
-    init_scale: float,
-    save_path: str = None,
-    group_label: str = "Group",
-    learning_rate: float = None,
-    hidden_dim: int = None,
-):
-    """Plot power spectrum of model outputs vs template for cyclic group Cn.
-
-    Mirrors plot_power_group but uses 1D FFT power.
-    Each frequency mode is treated as a 1D irrep.
-    """
-    import src.power as power
-
-    template_power, _ = power.get_power_1d(template_1d)
-    n_modes = len(template_power)
-
-    print(f"  Template power spectrum (cn): {template_power}")
-
-    model_powers, steps = power.model_power_over_time("cn", model, param_hist, X_eval)
-    epoch_numbers = [param_save_indices[min(s, len(param_save_indices) - 1)] for s in steps]
-
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-
-    top_k = min(5, n_modes)
-    top_mode_indices = np.argsort(template_power)[::-1][:top_k]
-    top_mode_indices = top_mode_indices[top_mode_indices != 0]
-
-    _cn_power_colors = ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
-    colors_line = _cn_power_colors[: len(top_mode_indices)]
-
-    valid_mask = np.array(epoch_numbers) > 0
-    valid_epochs = np.array(epoch_numbers)[valid_mask]
-    valid_model_powers = model_powers[valid_mask, :]
-
-    def _mode_label(idx):
-        return rf"$\rho_{{{idx}}}$ (1D)"
-
-    # Plot 1: Linear scales
-    ax = axes[0]
-    lines_info = []
-    for i, mode_idx in enumerate(top_mode_indices):
-        power_values = model_powers[:, mode_idx]
-        ax.plot(epoch_numbers, power_values, "-", lw=2, color=colors_line[i])
-        ax.axhline(template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i])
-        lines_info.append(
-            {
-                "x": epoch_numbers,
-                "y": power_values,
-                "label": _mode_label(mode_idx),
-                "color": colors_line[i],
-            }
-        )
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Power")
-    ax.set_title("Linear Scales", fontsize=12)
-    _add_line_labels(ax, lines_info)
-    ax.grid(True, alpha=0.3)
-
-    # Plot 2: Log x-axis only
-    ax = axes[1]
-    lines_info = []
-    for i, mode_idx in enumerate(top_mode_indices):
-        power_values = valid_model_powers[:, mode_idx]
-        ax.plot(valid_epochs, power_values, "-", lw=2, color=colors_line[i])
-        ax.axhline(template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i])
-        lines_info.append(
-            {
-                "x": valid_epochs,
-                "y": power_values,
-                "label": _mode_label(mode_idx),
-                "color": colors_line[i],
-            }
-        )
-    ax.set_xscale("log")
-    ax.set_xlabel("Epoch (log scale)")
-    ax.set_ylabel("Power")
-    ax.set_title("Log X-axis", fontsize=12)
-    _add_line_labels(ax, lines_info)
-    ax.grid(True, alpha=0.3)
-
-    # Plot 3: Log-log scales
-    ax = axes[2]
-    lines_info = []
-    for i, mode_idx in enumerate(top_mode_indices):
-        power_values = valid_model_powers[:, mode_idx]
-        power_mask = power_values > 0
-        if np.any(power_mask):
-            x_data = valid_epochs[power_mask]
-            y_data = power_values[power_mask]
-            ax.plot(x_data, y_data, "-", lw=2, color=colors_line[i])
-            lines_info.append(
-                {
-                    "x": x_data,
-                    "y": y_data,
-                    "label": _mode_label(mode_idx),
-                    "color": colors_line[i],
-                }
-            )
-        if template_power[mode_idx] > 0:
-            ax.axhline(
-                template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i]
-            )
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel("Epoch (log scale)")
-    ax.set_ylabel("Power (log scale)")
-    ax.set_title("Log-Log Scales", fontsize=12)
-    _add_line_labels(ax, lines_info)
-    ax.grid(True, alpha=0.3)
-
-    title_parts = [
-        f"{group_label} Power Evolution Over Training (k={k}, {optimizer}, init={init_scale:.0e}"
-    ]
-    if learning_rate is not None:
-        title_parts.append(f", lr={learning_rate}")
-    if hidden_dim is not None:
-        title_parts.append(f", h={hidden_dim}")
-    title_parts.append(")")
-    fig.suptitle("".join(title_parts), fontsize=14, fontweight="bold")
-
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, bbox_inches="tight", dpi=150)
-        print(f"  ✓ Saved {save_path}")
-    plt.close()
-
-    labels = [_mode_label(idx) for idx in top_mode_indices]
-    return {
-        "valid_epochs": valid_epochs,
-        "valid_model_powers": valid_model_powers,
-        "model_powers": model_powers,
-        "epoch_numbers": epoch_numbers,
-        "template_power": template_power,
-        "top_irrep_indices": top_mode_indices,
-        "colors_line": colors_line,
-        "labels": labels,
-    }
-
-
-def plot_power_cnxcn(
-    model,
-    param_hist,
-    param_save_indices,
-    X_eval,
-    template_2d: np.ndarray,
-    p1: int,
-    p2: int,
-    k: int,
-    optimizer: str,
-    init_scale: float,
-    save_path: str = None,
-    group_label: str = "Group",
-    learning_rate: float = None,
-    hidden_dim: int = None,
-):
-    """Plot power spectrum of model outputs vs template for CnxCn group.
-
-    Mirrors plot_power_cn but uses 2D rfft2 power.
-    Each 2D frequency mode (u, v) is tracked separately.
-    """
-    import src.power as power
-
-    template_power_2d = power.get_power_2d(template_2d, no_freq=True)  # (p1, p2//2+1)
-    template_power = template_power_2d.flatten()
-    n_modes = len(template_power)
-    n_cols = p2 // 2 + 1
-
-    print(f"  Template 2D power spectrum shape: {template_power_2d.shape}")
-
-    model_powers, steps = power.model_power_over_time("cnxcn", model, param_hist, X_eval)
-    epoch_numbers = [param_save_indices[min(s, len(param_save_indices) - 1)] for s in steps]
-
-    top_k = min(5, n_modes)
-    top_mode_indices = np.argsort(template_power)[::-1][:top_k]
-    top_mode_indices = top_mode_indices[top_mode_indices != 0]
-
-    _cnxcn_power_colors = ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
-    colors_line = _cnxcn_power_colors[: len(top_mode_indices)]
-
-    valid_mask = np.array(epoch_numbers) > 0
-    valid_epochs = np.array(epoch_numbers)[valid_mask]
-    valid_model_powers = model_powers[valid_mask, :]
-
-    def _mode_label(idx):
-        u = idx // n_cols
-        v = idx % n_cols
-        return rf"$({u},\,{v})$"
-
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-
-    # Plot 1: Linear scales
-    ax = axes[0]
-    lines_info = []
-    for i, mode_idx in enumerate(top_mode_indices):
-        power_values = model_powers[:, mode_idx]
-        ax.plot(epoch_numbers, power_values, "-", lw=2, color=colors_line[i])
-        ax.axhline(template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i])
-        lines_info.append(
-            {
-                "x": epoch_numbers,
-                "y": power_values,
-                "label": _mode_label(mode_idx),
-                "color": colors_line[i],
-            }
-        )
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Power")
-    ax.set_title("Linear Scales", fontsize=12)
-    _add_line_labels(ax, lines_info)
-    ax.grid(True, alpha=0.3)
-
-    # Plot 2: Log x-axis only
-    ax = axes[1]
-    lines_info = []
-    for i, mode_idx in enumerate(top_mode_indices):
-        power_values = valid_model_powers[:, mode_idx]
-        ax.plot(valid_epochs, power_values, "-", lw=2, color=colors_line[i])
-        ax.axhline(template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i])
-        lines_info.append(
-            {
-                "x": valid_epochs,
-                "y": power_values,
-                "label": _mode_label(mode_idx),
-                "color": colors_line[i],
-            }
-        )
-    ax.set_xscale("log")
-    ax.set_xlabel("Epoch (log scale)")
-    ax.set_ylabel("Power")
-    ax.set_title("Log X-axis", fontsize=12)
-    _add_line_labels(ax, lines_info)
-    ax.grid(True, alpha=0.3)
-
-    # Plot 3: Log-log scales
-    ax = axes[2]
-    lines_info = []
-    for i, mode_idx in enumerate(top_mode_indices):
-        power_values = valid_model_powers[:, mode_idx]
-        power_mask = power_values > 0
-        if np.any(power_mask):
-            x_data = valid_epochs[power_mask]
-            y_data = power_values[power_mask]
-            ax.plot(x_data, y_data, "-", lw=2, color=colors_line[i])
-            lines_info.append(
-                {
-                    "x": x_data,
-                    "y": y_data,
-                    "label": _mode_label(mode_idx),
-                    "color": colors_line[i],
-                }
-            )
-        if template_power[mode_idx] > 0:
-            ax.axhline(
-                template_power[mode_idx], linestyle="dotted", alpha=0.5, color=colors_line[i]
-            )
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel("Epoch (log scale)")
-    ax.set_ylabel("Power (log scale)")
-    ax.set_title("Log-Log Scales", fontsize=12)
-    _add_line_labels(ax, lines_info)
-    ax.grid(True, alpha=0.3)
-
-    title_parts = [
-        f"{group_label} Power Evolution Over Training (k={k}, {optimizer}, init={init_scale:.0e}"
-    ]
-    if learning_rate is not None:
-        title_parts.append(f", lr={learning_rate}")
-    if hidden_dim is not None:
-        title_parts.append(f", h={hidden_dim}")
-    title_parts.append(")")
-    fig.suptitle("".join(title_parts), fontsize=14, fontweight="bold")
-
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, bbox_inches="tight", dpi=150)
-        print(f"  \u2713 Saved {save_path}")
-    plt.close()
-
-    labels = [_mode_label(idx) for idx in top_mode_indices]
-    return {
-        "valid_epochs": valid_epochs,
-        "valid_model_powers": valid_model_powers,
-        "model_powers": model_powers,
-        "epoch_numbers": epoch_numbers,
-        "template_power": template_power,
-        "top_irrep_indices": top_mode_indices,
-        "colors_line": colors_line,
-        "labels": labels,
-    }
 
 
 def plot_wmix_structure(
@@ -1590,82 +1097,6 @@ def plot_wmix_structure(
     return fig, axes
 
 
-def plot_predictions_group(
-    model,
-    param_hist,
-    X_eval,
-    Y_eval,
-    group_size: int,
-    checkpoint_indices: list,
-    save_path: str = None,
-    num_samples: int = 5,
-    group_label: str = "Group",
-):
-    """Plot model predictions vs targets at different training checkpoints.
-
-    Args:
-        model: Trained model
-        param_hist: List of parameter snapshots
-        X_eval: Input evaluation tensor (N, k, group_size)
-        Y_eval: Target evaluation tensor (N, group_size)
-        group_size: Order of the group
-        checkpoint_indices: Indices into param_hist to visualize
-        save_path: Path to save the plot
-        num_samples: Number of samples to show
-        group_label: Human-readable label for the group (used in plot title)
-    """
-    import torch
-
-    n_checkpoints = len(checkpoint_indices)
-
-    fig, axes = plt.subplots(
-        num_samples, n_checkpoints, figsize=(4 * n_checkpoints, 3 * num_samples)
-    )
-    if num_samples == 1:
-        axes = axes.reshape(1, -1)
-    if n_checkpoints == 1:
-        axes = axes.reshape(-1, 1)
-
-    sample_indices = np.random.choice(
-        len(X_eval), size=min(num_samples, len(X_eval)), replace=False
-    )
-
-    for col, ckpt_idx in enumerate(checkpoint_indices):
-        model.load_state_dict(param_hist[ckpt_idx])
-        model.eval()
-
-        with torch.no_grad():
-            outputs = model(X_eval[sample_indices])
-            outputs_np = outputs.cpu().numpy()
-            targets_np = Y_eval[sample_indices].cpu().numpy()
-
-        for row, (output, target) in enumerate(zip(outputs_np, targets_np)):
-            ax = axes[row, col]
-            x_axis = np.arange(group_size)
-
-            ax.bar(x_axis - 0.15, target, width=0.3, label="Target", alpha=0.7, color="#2ecc71")
-            ax.bar(x_axis + 0.15, output, width=0.3, label="Output", alpha=0.7, color="#e74c3c")
-
-            if row == 0:
-                ax.set_title(f"Checkpoint {ckpt_idx}")
-            if col == 0:
-                ax.set_ylabel(f"Sample {sample_indices[row]}")
-            if row == num_samples - 1:
-                ax.set_xlabel("Group element")
-            if row == 0 and col == n_checkpoints - 1:
-                ax.legend(loc="upper right", fontsize=8)
-
-            ax.set_xticks(x_axis)
-            ax.grid(True, alpha=0.3)
-
-    plt.suptitle(f"{group_label} Predictions vs Targets Over Training", fontsize=14)
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, bbox_inches="tight", dpi=150)
-    plt.close()
-
-
 def plot_power_group(
     model,
     param_hist,
@@ -1699,26 +1130,29 @@ def plot_power_group(
         save_path: Path to save the plot
         group_label: Human-readable label for the group
     """
-    import src.power as power
-
-    group_name = "group"
     irreps = group.irreps()
     n_irreps = len(irreps)
 
     template_power = group.power_spectrum(template)
 
     print(f"  Template power spectrum: {template_power}")
-    print("  (These are dim^2 * diag_value^2 / |G| for each irrep)")
 
-    model_powers, steps = power.model_power_over_time(
-        group_name, model, param_hist, X_eval, group=group
-    )
+    indep = _independent_irrep_indices(group)
+    if len(indep) < n_irreps:
+        print(
+            f"  Showing {len(indep)}/{n_irreps} independent irreps "
+            f"(conjugate pairs share power for real templates)"
+        )
+
+    model_powers, steps = model_power_over_time(group, model, param_hist, X_eval)
     epoch_numbers = [param_save_indices[min(s, len(param_save_indices) - 1)] for s in steps]
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-    top_k = min(5, n_irreps)
-    top_irrep_indices = np.argsort(template_power)[::-1][:top_k]
+    top_k = min(5, len(indep))
+    indep_powers = np.array([template_power[i] for i in indep])
+    ranked = np.argsort(indep_powers)[::-1]
+    top_irrep_indices = np.array([indep[r] for r in ranked[:top_k]])
     top_irrep_indices = top_irrep_indices[top_irrep_indices != 0]
 
     _group_power_colors = ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
@@ -1833,84 +1267,6 @@ def plot_power_group(
     }
 
 
-def plot_loss_and_power(
-    x_values,
-    train_loss_hist,
-    x_label,
-    power_data,
-    save_path=None,
-    title=None,
-):
-    """Create combined 2-row plot: Log-Log loss (top) and Log-X power spectrum (bottom).
-
-    The two subplots share the x-axis (log-scale epochs/steps).
-
-    Args:
-        x_values: x-axis values for loss plot (epochs or steps)
-        train_loss_hist: training loss history
-        x_label: x-axis label (e.g., "Epoch")
-        power_data: dict returned by plot_power_group or plot_power_cn
-        save_path: path to save the figure
-        title: optional suptitle
-    """
-    fig, (ax_loss, ax_power) = plt.subplots(
-        2,
-        1,
-        figsize=(4, 8),
-        sharex=True,
-        gridspec_kw={"hspace": 0.10},
-    )
-
-    # --- Top row: Log-Log training loss ---
-    x_arr = np.asarray(x_values)
-    loss_arr = np.asarray(train_loss_hist)
-    pos_mask = x_arr > 0
-    ax_loss.plot(x_arr[pos_mask], loss_arr[pos_mask], lw=2, color="#1f77b4")
-    ax_loss.set_xscale("log")
-    ax_loss.set_yscale("log")
-    _training_loss_log_y_floor(ax_loss)
-    ax_loss.set_ylabel("Training Loss", fontsize=11)
-    ax_loss.grid(True, alpha=0.3)
-    ax_loss.tick_params(labelbottom=False)
-
-    # --- Bottom row: Log-X power spectrum with inline labels ---
-    valid_epochs = power_data["valid_epochs"]
-    valid_model_powers = power_data["valid_model_powers"]
-    template_power = power_data["template_power"]
-    top_indices = power_data["top_irrep_indices"]
-    colors_line = power_data["colors_line"]
-    labels = power_data["labels"]
-
-    lines_info = []
-    for i, idx in enumerate(top_indices):
-        pv = valid_model_powers[:, idx]
-        ax_power.plot(valid_epochs, pv, "-", lw=2, color=colors_line[i])
-        ax_power.axhline(template_power[idx], linestyle="--", alpha=0.5, color=colors_line[i])
-        lines_info.append(
-            {
-                "x": valid_epochs,
-                "y": pv,
-                "label": labels[i],
-                "color": colors_line[i],
-            }
-        )
-    _add_line_labels(ax_power, lines_info, fontsize=10)
-
-    ax_power.set_xscale("log")
-    ax_power.set_xlabel(x_label, fontsize=11)
-    ax_power.set_ylabel("Power", fontsize=11)
-    ax_power.grid(True, alpha=0.3)
-
-    if title:
-        fig.suptitle(title, fontsize=12, fontweight="bold")
-
-    plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path, bbox_inches="tight", dpi=150)
-        print(f"  ✓ Saved {save_path}")
-    plt.close()
-
-
 def plot_loss_power_and_weight_power(
     x_values,
     train_loss_hist,
@@ -1922,7 +1278,7 @@ def plot_loss_power_and_weight_power(
 ):
     """Create a 3-row plot: training loss, output power, and W dominant-mode fraction (optional).
 
-    The first two rows match :func:`plot_loss_and_power`. The third row is drawn when
+    The first two rows show training loss and power spectrum. The third row is drawn when
     ``weight_kw`` includes ``param_hist`` and group fields (same as
     :func:`plot_w_dominant_irrep_fraction`).
 
@@ -1990,11 +1346,7 @@ def plot_loss_power_and_weight_power(
         wdata = compute_w_dominant_irrep_fraction_data(
             param_hist,
             weight_kw["param_save_indices"],
-            weight_kw["group_size"],
-            weight_kw["group_name"],
-            group=weight_kw.get("group"),
-            p1=weight_kw.get("p1"),
-            p2=weight_kw.get("p2"),
+            weight_kw["group"],
         )
         if wdata is not None:
             mc = mode_colors_aligned_with_power_plot(

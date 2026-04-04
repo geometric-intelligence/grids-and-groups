@@ -37,10 +37,6 @@ class DihedralGroup(Group):
     def regular_rep(self) -> np.ndarray:
         return self._regular
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
     def _build_irreps(self) -> list[IrreducibleRepresentation]:
         N = self._N
         n_elems = self._order

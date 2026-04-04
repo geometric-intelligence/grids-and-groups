@@ -16,6 +16,11 @@ data:
   - 7.5
   - 5
   - 2.5
+  - 2.5
+  - 5
+  - 7.5
+  - 10
+  - 12.5
   seed: 10
   template_type: custom_fourier
 device: cuda:0
@@ -32,7 +37,7 @@ training:
   - 0.999
   degree: null
   dense_save_until: 10
-  epochs: 5000
+  epochs: 10000
   grad_clip: 0.1
   learning_rate: 0.01
   mode: offline

@@ -1,7 +1,8 @@
 # ============================================================================
 # Configuration: Product Group C_4 x C_4
 # ============================================================================
-# C4 x C4 has order 16. Uses 2D template with p1=4, p2=4.
+# C4 x C4 has order 16 and 16 irreps (j1,j2) in row-major order.
+# For a real template: power[j1,j2] = power[-j1 % 4, -j2 % 4].
 
 data:
   group_name: cnxcn           # Group family: 'cn' | 'cnxcn' | 'dihedral' | 'octahedral' | 'A5'
@@ -11,7 +12,12 @@ data:
   batch_size: 128             # Training batch size
   seed: 10                    # Random seed for reproducibility
   template_type: custom_fourier  # Template type: 'mnist' | 'custom_fourier'
-  powers: [100.0]             # Desired power per 2D Fourier mode (modes: (1,0))
+  # custom_fourier powers (one per irrep, 16 total, row-major (j1,j2))
+  # Non-zero modes: (1,0)/(3,0)=100
+  powers: [0, 0, 0, 0,
+           100, 0, 0, 0,
+           0, 0, 0, 0,
+           100, 0, 0, 0]
   mode: exhaustive            # Dataset mode: 'sampled' | 'exhaustive'
   num_samples: 1000           # Number of samples (used when mode='sampled')
 

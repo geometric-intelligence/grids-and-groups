@@ -62,10 +62,6 @@ class ProductCyclicGroup(Group):
                 reg[g, i, h] = 1.0
         return reg
 
-    # ------------------------------------------------------------------
-    # Fast FFT overrides
-    # ------------------------------------------------------------------
-
     def fourier_2d(self, signal_2d: np.ndarray) -> np.ndarray:
         """2D DFT-based Fourier transform returning the full spectrum array."""
         return np.fft.fft2(signal_2d)
@@ -100,4 +96,4 @@ class ProductCyclicGroup(Group):
         """Flat-signal power spectrum (one value per irrep)."""
         signal_2d = signal.reshape(self._p1, self._p2)
         ft = np.fft.fft2(signal_2d)
-        return (np.abs(ft) ** 2).ravel()
+        return (np.abs(ft) ** 2 / self._order).ravel()

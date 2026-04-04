@@ -1,7 +1,8 @@
 # ============================================================================
 # Configuration: Cyclic Group C_11
 # ============================================================================
-# C11 has order 11 and 6 frequency modes (0 through 5), all 1D.
+# C11 has order 11 and 11 irreps (frequency bins 0..10), all 1D.
+# For a real template: power[k] = power[N-k].
 
 data:
   group_name: cn              # Group family: 'cn' | 'cnxcn' | 'dihedral' | 'octahedral' | 'A5'
@@ -9,12 +10,13 @@ data:
   k: 2                        # Sequence length (number of group elements to compose)
   batch_size: 256             # Training batch size
   seed: 10                    # Random seed for reproducibility
-  template_type: custom_fourier  # Template type: 'onehot' | 'gaussian' | 'custom_fourier'
+  template_type: custom_fourier  # Template type: 'onehot' | 'custom_fourier'
   mode: exhaustive            # Dataset mode: 'sampled' | 'exhaustive'
   num_samples: 1000           # Number of samples (used when mode='sampled')
 
-  # custom_fourier powers (one per frequency mode 0..5)
-  powers: [0, 12.5, 10, 7.5, 5, 2.5] #[0.0, 200.0, 100.0, 50.0, 20.0, 5.]
+  # custom_fourier powers (one per irrep, 11 total)
+  # Conjugate-symmetric: p[k]=p[11-k] ensures a real template
+  powers: [0, 12.5, 10, 7.5, 5, 2.5, 2.5, 5, 7.5, 10, 12.5]
 
 model:
   model_type: TwoLayerMLP     # Model architecture: 'QuadraticRNN' | 'SequentialMLP' | 'TwoLayerMLP'
