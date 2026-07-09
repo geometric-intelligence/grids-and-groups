@@ -1,4 +1,4 @@
-name: group-agf
+name: grids
 channels:
   - conda-forge
   - defaults
