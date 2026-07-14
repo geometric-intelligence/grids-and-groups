@@ -7,9 +7,11 @@ class Group(ABC):
     """Abstract Base Class for Finite Groups in Group-AGF.
 
     Subclasses must implement ``order``, ``elements``, ``irreps``, and
-    ``regular_rep``.  The Fourier analysis methods (``fourier``,
-    ``inverse_fourier``, ``power_spectrum``) are provided as concrete
-    implementations that rely solely on the abstract interface.
+    ``regular_rep``.  Irreps may be dense objects or lazy objects, as long
+    as they expose ``.dim`` and ``__call__(element_index)``.  The Fourier
+    analysis methods (``fourier``, ``inverse_fourier``, ``power_spectrum``)
+    are provided as concrete implementations that rely solely on that small
+    interface.
     """
 
     @property
