@@ -88,9 +88,9 @@ The constructed notebooks share the group-agnostic implementation in `src/finite
 
 Recurrent mixing is kept factored as
 
-\[
+$$
 W_{\mathrm{mix}}h=W_{\mathrm{in}}(W_{\mathrm{out}}h),
-\]
+$$
 
 which avoids allocating a dense hidden-by-hidden matrix.
 
@@ -98,9 +98,9 @@ which avoids allocating a dense hidden-by-hidden matrix.
 
 This notebook constructs a QuadraticRNN analytically for
 
-\[
+$$
 \mathbb Z_n^2\rtimes C_3.
-\]
+$$
 
 It separates:
 
@@ -113,9 +113,9 @@ The truncated experiment includes triangular-lattice geometry, translation-only 
 
 This notebook applies the same construction to
 
-\[
+$$
 \mathbb Z_n^3\rtimes O,
-\]
+$$
 
 where \(O\) is the 24-element group of proper cubic rotations.
 

@@ -26,11 +26,11 @@
 
 This repository studies path integration as **sequential group composition**. A recurrent network receives an allocentric population code together with egocentric transformations and must maintain the allocentric code of their cumulative product:
 
-\[
+$$
 \left(x_{\mathrm{allo}},\; g_1\!\cdot x_{\mathrm{ego}},\ldots,g_T\!\cdot x_{\mathrm{ego}}\right)
 \longmapsto
 (g_T\cdots g_1)\!\cdot x_{\mathrm{allo}}.
-\]
+$$
 
 The group \(G\) specifies the geometry of the navigated space. Circular groups model head direction, product groups model periodic translations, and semidirect products model coupled rotations and translations in two and three dimensions.
 
@@ -47,13 +47,13 @@ For a finite group \(G\), an encoding \(x\in\mathbb R^{|G|}\) is equivalently a 
 
 The recurrent model uses a squared-ReLU activation,
 
-\[
+$$
 \sigma(z)=\operatorname{ReLU}(z)^2,
-\]
+$$
 
 and updates
 
-\[
+$$
 \begin{aligned}
 h_1 &= \sigma\!\left(W_{\mathrm{in}}x_{\mathrm{allo}}
       +W_{\mathrm{drive}}(g_1\!\cdot x_{\mathrm{ego}})\right),\\
@@ -61,7 +61,7 @@ h_t &= \sigma\!\left(W_{\mathrm{mix}}h_{t-1}
       +W_{\mathrm{drive}}(g_t\!\cdot x_{\mathrm{ego}})\right),\\
 y_t &= W_{\mathrm{out}}h_t.
 \end{aligned}
-\]
+$$
 
 The closed-form construction decomposes the computation into modules indexed by irreducible representations of \(G\). The same representation-theoretic quantities are used to analyze networks learned by gradient descent.
 
@@ -69,10 +69,10 @@ The closed-form construction decomposes the computation into modules indexed by 
 
 | Group | Interpretation | Status |
 | --- | --- | --- |
-| \(C_n\) | Circular variable or head direction | Training infrastructure |
-| \(C_n\times C_m\) | Periodic planar translations | Trained sequential notebook |
-| \(\mathbb Z_n^2\rtimes C_m\) | Discrete planar rigid motion | Trained and constructed notebooks |
-| \(\mathbb Z_n^3\rtimes O\) | Discrete volumetric motion with 24 proper cubic rotations | Constructed notebook |
+| $C_n$ | Circular variable or head direction | Training infrastructure |
+| $C_n\times C_m$ | Periodic planar translations | Trained sequential notebook |
+| $\mathbb Z_n^2\rtimes C_m$ | Discrete planar rigid motion (Discrete SE(2)) | Trained and constructed notebooks |
+| $\mathbb Z_n^3\rtimes O$ | Discrete volumetric motion with 24 proper cubic rotations (Discrete SE(3)) | Constructed notebook |
 
 The general training stack also includes cyclic, product-cyclic, dihedral, octahedral, and icosahedral benchmark groups.
 
@@ -205,9 +205,9 @@ result = rollout(params, x_allo, sequence)
 
 With `materialize_mix=False`, recurrent mixing is applied as
 
-\[
+$$
 W_{\mathrm{mix}}h=W_{\mathrm{in}}(W_{\mathrm{out}}h),
-\]
+$$
 
 avoiding the storage cost of a dense hidden-by-hidden matrix.
 
