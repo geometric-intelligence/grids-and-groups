@@ -141,6 +141,18 @@ def orientation_marginal(group, signal: np.ndarray) -> np.ndarray:
     return signal_to_tensor(group, signal).sum(axis=(1, 2, 3))
 
 
+def spatial_energy(group, signal: np.ndarray) -> np.ndarray:
+    """Return root-mean-square signal magnitude over cubic rotations."""
+    tensor = signal_to_tensor(group, signal)
+    return np.sqrt(np.mean(np.abs(tensor) ** 2, axis=0))
+
+
+def orientation_energy(group, signal: np.ndarray) -> np.ndarray:
+    """Return root-mean-square signal magnitude for each cubic rotation."""
+    tensor = signal_to_tensor(group, signal)
+    return np.sqrt(np.mean(np.abs(tensor) ** 2, axis=(1, 2, 3)))
+
+
 def decode_spatial_argmax(group, signal: np.ndarray) -> tuple[int, int, int]:
     """Decode the spatial center after marginalizing over rotations."""
     spatial = spatial_marginal(group, signal)
@@ -242,3 +254,145 @@ def plot_trajectory(
     ax.set_zlabel("z")
     ax.set_title(title)
     return ax
+
+
+def plot_pose_trajectory(
+    group,
+    exact_positions: np.ndarray,
+    predicted_positions: np.ndarray,
+    *,
+    title: str = "Spatial pose trajectory",
+):
+    """Overlay exact and decoded wrapped trajectories on the cubic lattice."""
+    exact_positions = np.asarray(exact_positions)
+    predicted_positions = np.asarray(predicted_positions)
+    expected_shape = (exact_positions.shape[0], 3)
+    if exact_positions.shape != expected_shape:
+        raise ValueError(
+            f"exact_positions must have shape (steps, 3), got {exact_positions.shape}"
+        )
+    if predicted_positions.shape != exact_positions.shape:
+        raise ValueError(
+            "predicted_positions must have the same shape as exact_positions"
+        )
+
+    figure = plt.figure(figsize=(7.2, 6.2), constrained_layout=True)
+    ax = figure.add_subplot(111, projection="3d")
+    grid = np.indices((group.n, group.n, group.n)).reshape(3, -1).T
+    ax.scatter(
+        grid[:, 0],
+        grid[:, 1],
+        grid[:, 2],
+        s=12,
+        color="0.85",
+        alpha=0.45,
+        depthshade=False,
+    )
+
+    def plot_segments(positions, *, color, linestyle, label, linewidth):
+        jumps = np.any(np.abs(np.diff(positions, axis=0)) > 1, axis=1)
+        start = 0
+        first = True
+        for stop in np.append(np.flatnonzero(jumps), len(positions) - 1):
+            segment = positions[start : stop + 1]
+            if len(segment):
+                ax.plot(
+                    segment[:, 0],
+                    segment[:, 1],
+                    segment[:, 2],
+                    color=color,
+                    linestyle=linestyle,
+                    linewidth=linewidth,
+                    alpha=0.9,
+                    label=label if first else None,
+                )
+                first = False
+            start = stop + 1
+
+    plot_segments(
+        exact_positions,
+        color="#E45756",
+        linestyle="-",
+        label="exact pose",
+        linewidth=2.4,
+    )
+    plot_segments(
+        predicted_positions,
+        color="black",
+        linestyle="--",
+        label="decoded pose",
+        linewidth=1.8,
+    )
+    ax.scatter(
+        *exact_positions[0],
+        s=90,
+        color="#E45756",
+        edgecolors="black",
+        linewidths=0.7,
+        label="start",
+    )
+    ax.scatter(
+        *exact_positions[-1],
+        s=130,
+        marker="*",
+        color="#E45756",
+        edgecolors="black",
+        linewidths=0.7,
+        label="end",
+    )
+    ax.set(
+        xlim=(-0.25, group.n - 0.75),
+        ylim=(-0.25, group.n - 0.75),
+        zlim=(-0.25, group.n - 0.75),
+        xlabel="x",
+        ylabel="y",
+        zlabel="z",
+        title=title,
+    )
+    ax.set_box_aspect((1, 1, 1))
+    ax.legend(frameon=False, loc="upper left")
+    return ax
+
+
+def plot_volume_scatter(
+    volume: np.ndarray,
+    *,
+    ax=None,
+    title: str | None = None,
+    cmap: str = "viridis",
+    vmin: float | None = None,
+    vmax: float | None = None,
+):
+    """Plot a small cubic scalar volume as colored, activity-scaled points."""
+    volume = np.asarray(volume)
+    if volume.ndim != 3 or len(set(volume.shape)) != 1:
+        raise ValueError(f"volume must be cubic, got {volume.shape}")
+    if ax is None:
+        figure = plt.figure(figsize=(5, 4.5), constrained_layout=True)
+        ax = figure.add_subplot(111, projection="3d")
+    coordinates = np.indices(volume.shape).reshape(3, -1).T
+    values = volume.reshape(-1)
+    lower = float(values.min()) if vmin is None else vmin
+    upper = float(values.max()) if vmax is None else vmax
+    span = upper - lower
+    normalized = np.zeros_like(values) if span == 0 else (values - lower) / span
+    artist = ax.scatter(
+        coordinates[:, 0],
+        coordinates[:, 1],
+        coordinates[:, 2],
+        c=values,
+        s=20 + 160 * np.clip(normalized, 0, 1),
+        cmap=cmap,
+        vmin=lower,
+        vmax=upper,
+        alpha=0.85,
+        depthshade=False,
+    )
+    ax.set(
+        xlabel="x",
+        ylabel="y",
+        zlabel="z",
+        title=title,
+    )
+    ax.set_box_aspect((1, 1, 1))
+    return artist

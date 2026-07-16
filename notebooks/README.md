@@ -11,6 +11,7 @@ notebooks/
 │   ├── discrete_se2_analysis.ipynb
 │   └── discrete_se2_local_composition.ipynb
 └── constructed_networks/
+    ├── rnn_constructed_cnxcn.ipynb
     ├── rnn_constructed_discrete_SE2_m3.ipynb
     └── rnn_constructed_discrete_SE3.ipynb
 ```
@@ -26,6 +27,7 @@ The notebooks in `trained_networks/` learn group composition from data using PyT
 | [`trained_networks/discrete_se2_rnn.ipynb`](trained_networks/discrete_se2_rnn.ipynb) | Trained QuadraticRNN | Main end-to-end discrete-SE(2) training experiment |
 | [`trained_networks/discrete_se2_analysis.ipynb`](trained_networks/discrete_se2_analysis.ipynb) | Post-hoc analysis | Load and analyze saved discrete-SE(2) runs without retraining |
 | [`trained_networks/discrete_se2_local_composition.ipynb`](trained_networks/discrete_se2_local_composition.ipynb) | Trained QuadraticRNN | Test whether local generator compositions generalize globally |
+| [`constructed_networks/rnn_constructed_cnxcn.ipynb`](constructed_networks/rnn_constructed_cnxcn.ipynb) | Closed-form QuadraticRNN | Exact and Fourier-truncated translations on \(C_n\times C_n\) |
 | [`constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb`](constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb) | Closed-form QuadraticRNN | Exact and Fourier-truncated constructions on \(\mathbb Z_n^2\rtimes C_3\) |
 | [`constructed_networks/rnn_constructed_discrete_SE3.ipynb`](constructed_networks/rnn_constructed_discrete_SE3.ipynb) | Closed-form QuadraticRNN | Exact and cost-aware truncated constructions on \(\mathbb Z_n^3\rtimes O\) |
 
@@ -83,6 +85,7 @@ The model fits local compositions but does not infer global composition.
 
 The constructed notebooks share the group-agnostic implementation in `src/finite_group_rnn.py`. Geometry and decoding live in:
 
+- `src/cnxcn_geometry.py`;
 - `src/discrete_se2_geometry.py`;
 - `src/discrete_se3_geometry.py`.
 
@@ -93,6 +96,27 @@ W_{\mathrm{mix}}h=W_{\mathrm{in}}(W_{\mathrm{out}}h),
 $$
 
 which avoids allocating a dense hidden-by-hidden matrix.
+
+### `rnn_constructed_cnxcn.ipynb`
+
+This notebook is the translation-only counterpart of the discrete-\(SE(2)\)
+construction. It uses
+
+$$
+C_n\times C_n
+$$
+
+acting on a periodic square grid. A small \(n=4\) all-irrep experiment verifies
+the exact regular action. The main \(n=50\) experiment retains ten
+one-dimensional Fourier characters and includes allocentric and egocentric
+encodings, Fourier-mode selection, all four analytical weight operators, short
+and 250-step rollouts, reconstruction and center errors, trajectory plots,
+snapshots, and hidden-unit tuning.
+
+Unlike discrete \(SE(2)\), this group is abelian and has no orientation
+coordinate. Consequently, the visualizations are direct square-grid fields:
+there is no direction alignment, orientation marginal, or noncommuting
+translation–rotation test.
 
 ### `rnn_constructed_discrete_SE2_m3.ipynb`
 
@@ -105,9 +129,12 @@ $$
 It separates:
 
 1. a small all-irrep experiment that verifies exact translation, rotation, and mixed composition to floating-point precision; and
-2. a moderate \(n=8\) experiment using four high-power irreps.
+2. the original \(n=50\) spatial experiment using ten high-power irreps, with
+   \(n=8\) retained as an automated-test mode.
 
-The truncated experiment includes triangular-lattice geometry, translation-only and rotation-containing rollouts, separate signal and center errors, and static hidden-unit tuning.
+The truncated experiment includes aligned triangular-lattice encodings, all four
+analytical weight operators, short and long rollouts, separate signal and center
+errors, reconstruction snapshots, and static hidden-unit tuning.
 
 ### `rnn_constructed_discrete_SE3.ipynb`
 
@@ -128,7 +155,18 @@ The \(n=3\) experiment selects six irreps under a hidden-width budget:
 - width reduction: approximately 95.3%;
 - retained Fourier power: approximately 48.6%.
 
-The three-dimensional encoding makes both position and orientation observable. The notebook reports full-signal, decoded-position, and decoded-rotation errors separately and includes orthogonal-slice, orientation, and trajectory plots.
+The three-dimensional encoding makes both position and orientation observable.
+The notebook reports full-signal, decoded-position, and decoded-rotation errors
+separately. It includes allocentric and egocentric encoding diagnostics, all four
+weight operators, a long mixed-motion rollout, reconstruction snapshots, and
+spatial and orientation tuning plots.
+
+These SE(3) figures are deliberately projections of the full signal on
+\(\mathbb Z_n^3\times O\): orthogonal slices summarize spatial volumes, 24-bin
+bars summarize orientation, signed random encodings are displayed through RMS
+energy, and hidden tuning uses both aligned 3D lattice scatters and orientation
+heatmaps. The wrapped trajectory breaks lines at periodic boundaries. No single
+figure is intended to be a lossless view of the four-dimensional signal.
 
 ## Which notebook to use
 
