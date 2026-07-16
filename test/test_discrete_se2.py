@@ -59,16 +59,23 @@ class TestConstruction:
 class TestEncodeDecode:
     def test_roundtrip_all_elements(self, group):
         for idx in range(group.order):
-            x, y, r = group._decode(idx)
-            assert group._encode(x, y, r) == idx
+            x, y, r = group.decode(idx)
+            assert group.encode(x, y, r) == idx
 
     def test_decode_bounds(self, group):
-        n, m = group._n, group._m
+        n, m = group.n, group.m
         for idx in range(group.order):
-            x, y, r = group._decode(idx)
+            x, y, r = group.decode(idx)
             assert 0 <= x < n
             assert 0 <= y < n
             assert 0 <= r < m
+
+    def test_encode_reduces_coordinates_modulo_orders(self, group):
+        assert group.encode(group.n, group.n, group.m) == group.identity()
+
+    def test_decode_rejects_invalid_index(self, group):
+        with pytest.raises(ValueError, match="element index"):
+            group.decode(group.order)
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +86,7 @@ class TestEncodeDecode:
 class TestGroupAxioms:
     def _identity(self, group):
         """Index of the identity element (x=0, y=0, r=0)."""
-        return group._encode(0, 0, 0)
+        return group.identity()
 
     def test_identity_is_zero(self, group):
         assert self._identity(group) == 0
@@ -97,8 +104,9 @@ class TestGroupAxioms:
     def test_every_element_has_inverse(self, group):
         e = self._identity(group)
         for g in group.elements():
-            found = any(group.compose(g, h) == e for h in group.elements())
-            assert found, f"No inverse found for element {g}"
+            inverse = group.inverse(g)
+            assert group.compose(g, inverse) == e
+            assert group.compose(inverse, g) == e
 
     def test_associativity_sample(self, group):
         """Check (a*b)*c == a*(b*c) for a dense sample of triples."""
@@ -117,6 +125,11 @@ class TestGroupAxioms:
 
 
 class TestRegularRep:
+    def test_is_built_lazily(self, group):
+        assert group._regular is None
+        group.regular_rep()
+        assert group._regular is not None
+
     def test_shape(self, group):
         reg = group.regular_rep()
         n = group.order
@@ -143,6 +156,37 @@ class TestRegularRep:
             e_h[h] = 1.0
             result = reg[g] @ e_h
             assert result[gh] == pytest.approx(1.0)
+
+    def test_large_group_directs_callers_to_left_action(self):
+        group = DiscreteSE2Group(n=11, m=6)
+        with pytest.raises(MemoryError, match=r"Use left_action\(\) instead"):
+            group.regular_rep()
+
+
+class TestLeftAction:
+    def test_matches_regular_rep(self, group):
+        rng = np.random.default_rng(5)
+        signal = rng.standard_normal(group.order)
+        for element in group.elements():
+            np.testing.assert_allclose(
+                group.left_action(element, signal),
+                group.regular_rep()[element] @ signal,
+            )
+
+    def test_composes_in_group_order(self, group):
+        rng = np.random.default_rng(6)
+        signal = rng.standard_normal(group.order)
+        first, second = rng.choice(group.elements(), size=2)
+        expected = group.left_action(group.compose(int(second), int(first)), signal)
+        actual = group.left_action(int(second), group.left_action(int(first), signal))
+        np.testing.assert_allclose(actual, expected)
+
+    def test_cumulative_product(self, group):
+        sequence = group.elements()[:3]
+        expected = group.identity()
+        for element in sequence:
+            expected = group.compose(element, expected)
+        assert group.cumulative_product(sequence) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +230,7 @@ class TestIrreps:
 
     def test_irrep_identity_is_identity_matrix(self, group):
         """ρ(e) must be the identity matrix for every irrep."""
-        e = group._encode(0, 0, 0)
+        e = group.identity()
         for irrep in group.irreps():
             np.testing.assert_allclose(
                 irrep(e),
@@ -194,6 +238,17 @@ class TestIrreps:
                 atol=1e-10,
                 err_msg=f"irrep {irrep._name} ρ(e) != I",
             )
+
+    def test_character_orbits_partition_dual_group(self, group):
+        orbit_dict = group.orbit_dict()
+        labels = [label for orbits in orbit_dict.values() for orbit in orbits for label in orbit]
+        assert len(labels) == group.n**2
+        assert len(set(labels)) == group.n**2
+
+    def test_conjugate_pairs_partition_irreps(self, group):
+        pairs = group.conjugate_pairs()
+        indices = [index for pair in pairs for index in pair]
+        assert sorted(indices) == list(range(len(group.irreps())))
 
 
 # ---------------------------------------------------------------------------

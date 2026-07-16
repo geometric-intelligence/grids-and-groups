@@ -8,7 +8,7 @@ from src.groups import DiscreteSE3Group, LazyIrreducibleRepresentation, make_gro
 
 
 def _identity(group: DiscreteSE3Group) -> int:
-    return group._encode(0, 0, 0, 0)
+    return group.identity()
 
 
 class TestConstructionAndOrbits:
@@ -20,6 +20,16 @@ class TestConstructionAndOrbits:
     def test_irreps_are_lazy(self):
         group = DiscreteSE3Group(2)
         assert all(isinstance(ir, LazyIrreducibleRepresentation) for ir in group.irreps())
+
+    def test_public_encode_decode_roundtrip(self):
+        group = DiscreteSE3Group(2)
+        for element in group.elements():
+            assert group.encode(*group.decode(element)) == element
+
+    def test_public_dimensions(self):
+        group = DiscreteSE3Group(3)
+        assert group.n == 3
+        assert group.num_rotations == 24
 
     @pytest.mark.parametrize("n", [2, 3, 4, 5])
     def test_orbit_stabilizer(self, n):
@@ -87,6 +97,46 @@ class TestInducedIrreps:
                 )
 
 
+class TestActions:
+    def test_inverse(self):
+        group = DiscreteSE3Group(2)
+        for element in group.elements():
+            inverse = group.inverse(element)
+            assert group.compose(element, inverse) == group.identity()
+            assert group.compose(inverse, element) == group.identity()
+
+    def test_left_action_matches_regular_rep(self):
+        group = DiscreteSE3Group(2)
+        signal = np.random.default_rng(4).standard_normal(group.order)
+        for element in (0, 1, 17, group.order - 1):
+            np.testing.assert_allclose(
+                group.left_action(element, signal),
+                group.regular_rep()[element] @ signal,
+            )
+
+    def test_left_actions_compose(self):
+        group = DiscreteSE3Group(2)
+        signal = np.random.default_rng(5).standard_normal(group.order)
+        first = group.encode(1, 0, 0, 0)
+        second = group.encode(0, 0, 0, 7)
+        np.testing.assert_allclose(
+            group.left_action(second, group.left_action(first, signal)),
+            group.left_action(group.compose(second, first), signal),
+        )
+
+    def test_cumulative_product_uses_left_action_order(self):
+        group = DiscreteSE3Group(2)
+        sequence = [
+            group.encode(1, 0, 0, 0),
+            group.encode(0, 0, 0, 3),
+            group.encode(0, 1, 0, 0),
+        ]
+        expected = group.identity()
+        for element in sequence:
+            expected = group.compose(element, expected)
+        assert group.cumulative_product(sequence) == expected
+
+
 class TestFourier:
     def test_fourier_roundtrip(self):
         group = DiscreteSE3Group(2)
@@ -145,5 +195,5 @@ class TestConjugates:
 class TestGuards:
     def test_regular_rep_guard_for_large_group(self):
         group = DiscreteSE3Group(3)
-        with pytest.raises(MemoryError, match="regular_rep"):
+        with pytest.raises(MemoryError, match="left_action"):
             group.regular_rep()
