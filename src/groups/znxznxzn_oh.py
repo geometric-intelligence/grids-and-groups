@@ -168,8 +168,10 @@ class DiscreteSE3Group(Group):
         self._n = int(n)
         self._rot_mats = _generate_rotational_octahedral_matrices()
         self._rot_cayley = self._build_rotation_cayley()
+        self._rot_inverse = self._build_rotation_inverses()
         self._order_val = _ROTATION_ORDER * self._n**3
         self._regular: np.ndarray | None = None
+        self._action_permutations: dict[int, np.ndarray] = {}
 
         self._orbit_data = self._compute_orbit_data()
         self._little_irrep_cache: dict[tuple[int, ...], list[LittleIrrep]] = {}
@@ -180,6 +182,16 @@ class DiscreteSE3Group(Group):
     def order(self) -> int:
         return self._order_val
 
+    @property
+    def n(self) -> int:
+        """Order of each cyclic translation factor."""
+        return self._n
+
+    @property
+    def num_rotations(self) -> int:
+        """Number of proper cubic rotations."""
+        return _ROTATION_ORDER
+
     def elements(self) -> list[int]:
         return list(range(self._order_val))
 
@@ -187,10 +199,11 @@ class DiscreteSE3Group(Group):
         return list(self._irreps)
 
     def regular_rep(self) -> np.ndarray:
+        """Return dense regular-representation matrices for small groups only."""
         if self.order > _REGULAR_REP_MAX_ORDER:
             raise MemoryError(
                 f"regular_rep() would allocate a dense ({self.order}, {self.order}, "
-                f"{self.order}) tensor. Use GroupCompositionDataset(..., online=True)."
+                f"{self.order}) tensor. Use left_action() instead."
             )
         if self._regular is None:
             reg = np.zeros((self.order, self.order, self.order), dtype=np.float32)
@@ -217,14 +230,51 @@ class DiscreteSE3Group(Group):
         y, z = divmod(rem, n)
         return x, y, z, r
 
+    def encode(self, x: int, y: int, z: int, r: int) -> int:
+        """Encode a group element, reducing coordinates to valid ranges."""
+        return self._encode(
+            int(x) % self.n,
+            int(y) % self.n,
+            int(z) % self.n,
+            int(r) % self.num_rotations,
+        )
+
+    def decode(self, idx: int) -> tuple[int, int, int, int]:
+        """Decode an element index as ``(x, y, z, rotation)``."""
+        idx = int(idx)
+        if not 0 <= idx < self.order:
+            raise ValueError(f"element index must be in [0, {self.order}), got {idx}")
+        return self._decode(idx)
+
+    def identity(self) -> int:
+        """Return the identity element index."""
+        return self.encode(0, 0, 0, 0)
+
+    def rotation_matrix(self, r: int) -> np.ndarray:
+        """Return the integer matrix for rotation index ``r``."""
+        return self._rot_mats[int(r) % self.num_rotations].copy()
+
+    def apply_rotation(self, r: int, x: int, y: int, z: int) -> tuple[int, int, int]:
+        """Apply a cubic rotation to a translation coordinate."""
+        return self._apply_rotation(int(r) % self.num_rotations, x, y, z)
+
+    def inverse(self, g: int) -> int:
+        """Return the inverse of element ``g``."""
+        x, y, z, r = self.decode(g)
+        r_inverse = int(self._rot_inverse[r])
+        x_inverse, y_inverse, z_inverse = self._apply_rotation(
+            r_inverse, -x, -y, -z
+        )
+        return self.encode(x_inverse, y_inverse, z_inverse, r_inverse)
+
     def _apply_rotation(self, r: int, x: int, y: int, z: int) -> tuple[int, int, int]:
         vec = np.array([x, y, z], dtype=int)
         rotated = self._rot_mats[int(r)] @ vec
         return tuple((rotated % self._n).tolist())
 
     def compose(self, g: int, h: int) -> int:
-        x1, y1, z1, r1 = self._decode(g)
-        x2, y2, z2, r2 = self._decode(h)
+        x1, y1, z1, r1 = self.decode(g)
+        x2, y2, z2, r2 = self.decode(h)
         x2r, y2r, z2r = self._apply_rotation(r1, x2, y2, z2)
         r12 = int(self._rot_cayley[r1, r2])
         return self._encode(
@@ -234,6 +284,34 @@ class DiscreteSE3Group(Group):
             r12,
         )
 
+    def action_permutation(self, g: int) -> np.ndarray:
+        """Indices implementing ``(g · x)[h] = x[g⁻¹h]``."""
+        g = int(g)
+        if g not in self._action_permutations:
+            inverse = self.inverse(g)
+            self._action_permutations[g] = np.fromiter(
+                (self.compose(inverse, h) for h in self.elements()),
+                dtype=np.int64,
+                count=self.order,
+            )
+        return self._action_permutations[g]
+
+    def left_action(self, g: int, signal: np.ndarray) -> np.ndarray:
+        """Apply the left action to signals whose final axis indexes the group."""
+        signal = np.asarray(signal)
+        if signal.shape[-1] != self.order:
+            raise ValueError(
+                f"signal final axis must have length {self.order}, got {signal.shape}"
+            )
+        return np.take(signal, self.action_permutation(g), axis=-1)
+
+    def cumulative_product(self, sequence) -> int:
+        """Return ``g_T ... g_1`` for drives ``(g_1, ..., g_T)``."""
+        total = self.identity()
+        for element in sequence:
+            total = self.compose(int(element), total)
+        return total
+
     def _build_rotation_cayley(self) -> np.ndarray:
         index = {tuple(mat.ravel()): i for i, mat in enumerate(self._rot_mats)}
         cayley = np.empty((_ROTATION_ORDER, _ROTATION_ORDER), dtype=np.int64)
@@ -241,6 +319,18 @@ class DiscreteSE3Group(Group):
             for b, mat_b in enumerate(self._rot_mats):
                 cayley[a, b] = index[tuple((mat_a @ mat_b).ravel())]
         return cayley
+
+    def _build_rotation_inverses(self) -> np.ndarray:
+        inverses = np.empty(_ROTATION_ORDER, dtype=np.int64)
+        for rotation in range(_ROTATION_ORDER):
+            matches = np.where(
+                (self._rot_cayley[rotation] == 0)
+                & (self._rot_cayley[:, rotation] == 0)
+            )[0]
+            if len(matches) != 1:
+                raise ValueError(f"could not find inverse for rotation {rotation}")
+            inverses[rotation] = int(matches[0])
+        return inverses
 
     def _dual_action(self, r: int, k: tuple[int, int, int]) -> tuple[int, int, int]:
         vec = np.array(k, dtype=int)
