@@ -604,7 +604,7 @@ def train_single_run(config: dict, run_dir: Path = None) -> dict:
     group_size = group.order
 
     print(f"Group: {group_name}, order {group_size}")
-    print(f"Irrep dimensions: {[ir.size for ir in group.irreps()]}")
+    print(f"Irrep dimensions: {[ir.dim for ir in group.irreps()]}")
 
     # Template generation -- special-purpose templates first, then custom_fourier via group
     if template_type == "mnist" and group_name == "cn":

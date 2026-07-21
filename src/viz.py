@@ -1204,7 +1204,7 @@ def plot_power_group(
     valid_model_powers = model_powers[valid_mask, :]
 
     def _irrep_label(idx, irreps):
-        dim = irreps[idx].size
+        dim = irreps[idx].dim
         dim_str = f"{dim}D"
         return rf"$\rho_{{{idx}}}$ ({dim_str})"
 

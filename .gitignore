@@ -14,7 +14,7 @@ notebooks/W-weights.pdf
 notebooks/predictions.pdf
 
 runs/
-#data/
+data/
 !notebooks/data/
 sweep_results/
 

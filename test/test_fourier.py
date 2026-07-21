@@ -27,7 +27,7 @@ def test_group_fourier_coefs_shape():
 
     assert len(fourier_coefs) == len(group.irreps())
     for coef, irrep in zip(fourier_coefs, group.irreps()):
-        assert coef.shape == (irrep.size, irrep.size)
+        assert coef.shape == (irrep.dim, irrep.dim)
 
 
 if __name__ == "__main__":

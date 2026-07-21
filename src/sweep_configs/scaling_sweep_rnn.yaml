@@ -1,0 +1,42 @@
+# One-hot template scaling sweep — QuadraticRNN
+# Same grid as the SequentialMLP sweep but using the RNN model.
+
+base_config: "src/configs/config.yaml"
+n_seeds: 1
+
+# Fixed parameters applied to all experiments
+global_overrides:
+  data:
+    dimension: 1
+    template_type: 'onehot'
+    group_name: cn
+
+  model:
+    model_type: QuadraticRNN
+    transform_type: quadratic
+    init_scale: 5.0e-2
+    return_all_outputs: false
+
+  training:
+    mode: online
+    learning_rate: 1.0e-3
+    optimizer: adam
+    reduction_threshold: 0.999
+    num_steps: 1000000
+    quiet: true
+
+  analysis:
+    plots:
+      template: false
+      training_loss: true
+      predictions: false
+      power_spectrum: false
+      wmix: false
+      w_dominant_irrep_fraction: false
+
+parameter_grid:
+  data:
+    k: [5]
+    p: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+  model:
+    hidden_dim: [18, 36, 54, 72, 90, 108, 126, 144, 162, 180, 198, 216, 234, 252, 270, 288, 306, 324, 342, 360, 378]

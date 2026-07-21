@@ -93,19 +93,19 @@ class TestIrrepDimsOrdering:
 
     def test_octahedral_dims(self):
         g = OctahedralGroup()
-        dims = [ir.size for ir in g.irreps()]
+        dims = [ir.dim for ir in g.irreps()]
         assert dims == [1, 3, 3, 2, 1]
 
     def test_a5_dims(self):
         g = IcosahedralGroup()
-        dims = [ir.size for ir in g.irreps()]
+        dims = [ir.dim for ir in g.irreps()]
         assert dims == [1, 3, 5, 3, 4]
 
 
 class TestIrrepCountAndDims:
     def test_same_count_and_dims(self, group_pair):
         ours, escnn_g = group_pair
-        our_dims = [ir.size for ir in ours.irreps()]
+        our_dims = [ir.dim for ir in ours.irreps()]
         escnn_dims = [ir.size for ir in escnn_g.irreps()]
         assert our_dims == escnn_dims
 
@@ -181,5 +181,5 @@ class TestPowerSpectrum:
         escnn_ps = np.zeros(len(escnn_irreps))
         for i, irrep in enumerate(escnn_irreps):
             fc = escnn_coefs[i]
-            escnn_ps[i] = irrep.size * np.trace(fc.conj().T @ fc)
+            escnn_ps[i] = irrep.size * np.trace(fc.conj().T @ fc)  # escnn uses .size
         np.testing.assert_allclose(our_ps, escnn_ps / ours.order, atol=1e-10)

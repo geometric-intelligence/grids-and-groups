@@ -7,9 +7,11 @@ class Group(ABC):
     """Abstract Base Class for Finite Groups in Group-AGF.
 
     Subclasses must implement ``order``, ``elements``, ``irreps``, and
-    ``regular_rep``.  The Fourier analysis methods (``fourier``,
-    ``inverse_fourier``, ``power_spectrum``) are provided as concrete
-    implementations that rely solely on the abstract interface.
+    ``regular_rep``.  Irreps may be dense objects or lazy objects, as long
+    as they expose ``.dim`` and ``__call__(element_index)``.  The Fourier
+    analysis methods (``fourier``, ``inverse_fourier``, ``power_spectrum``)
+    are provided as concrete implementations that rely solely on that small
+    interface.
     """
 
     @property
@@ -74,7 +76,7 @@ class Group(ABC):
 
         def _at_element(g):
             return (1.0 / n) * sum(
-                irrep.size * np.trace(irrep(g) @ fourier_coefs[i]) for i, irrep in enumerate(irreps)
+                irrep.dim * np.trace(irrep(g) @ fourier_coefs[i]) for i, irrep in enumerate(irreps)
             )
 
         return np.array([_at_element(g) for g in range(n)])
@@ -104,5 +106,5 @@ class Group(ABC):
         ps = np.zeros(len(irreps))
         for i, irrep in enumerate(irreps):
             fc = fourier_coefs[i]
-            ps[i] = irrep.size * np.trace(fc.conj().T @ fc) / self.order
+            ps[i] = np.real(irrep.dim * np.trace(fc.conj().T @ fc)) / self.order
         return ps

@@ -1,4 +1,4 @@
-"""Training function for Quadratic RNN with sequential inputs."""
+"""Training function for TwoLayerMLP or QuadraticRNN with sequential inputs."""
 
 import torch
 import torch.optim as optim
