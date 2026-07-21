@@ -28,6 +28,8 @@ scikit-learn = "^1.7.2"
 tqdm = "^4.67.1"
 seaborn = "^0.13.2"
 jupyter-black = "^0.4.0"
+umap-learn = "^0.5.12"
+ripser = "^0.6.15"
 
 
 [build-system]

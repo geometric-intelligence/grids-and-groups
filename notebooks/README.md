@@ -87,7 +87,8 @@ The constructed notebooks share the group-agnostic implementation in `src/finite
 
 - `src/cnxcn_geometry.py`;
 - `src/discrete_se2_geometry.py`;
-- `src/discrete_se3_geometry.py`.
+- `src/discrete_se3_geometry.py`;
+- `src/neural_manifold.py`.
 
 Recurrent mixing is kept factored as
 
@@ -96,6 +97,20 @@ W_{\mathrm{mix}}h=W_{\mathrm{in}}(W_{\mathrm{out}}h),
 $$
 
 which avoids allocating a dense hidden-by-hidden matrix.
+
+All three constructed notebooks also evaluate module-restricted neural orbits
+
+$$
+\mathcal M_{\rho,x}
+=
+\{\Pi_\rho\Phi(g\cdot x):g\in G\}.
+$$
+
+The shared analysis combines conjugate irreps when they are available, checks
+the identity-update fixed-point residual, uses UMAP only for visualization, and
+computes Vietoris–Rips persistent homology after PCA in neural space. Persistent
+homology uses deterministic farthest-point subsampling. These analyses require
+`umap-learn` and `ripser`, both included in the project dependencies.
 
 ### `rnn_constructed_cnxcn.ipynb`
 
@@ -107,7 +122,7 @@ C_n\times C_n
 $$
 
 acting on a periodic square grid. A small \(n=4\) all-irrep experiment verifies
-the exact regular action. The main \(n=50\) experiment retains ten
+the exact regular action. The main \(n=50\) experiment retains 500
 one-dimensional Fourier characters and includes allocentric and egocentric
 encodings, Fourier-mode selection, all four analytical weight operators, short
 and 250-step rollouts, reconstruction and center errors, trajectory plots,
@@ -117,6 +132,11 @@ Unlike discrete \(SE(2)\), this group is abelian and has no orientation
 coordinate. Consequently, the visualizations are direct square-grid fields:
 there is no direction alignment, orientation marginal, or noncommuting
 translation–rotation test.
+
+For manifold analysis, one conjugate Fourier pair usually exposes one circular
+phase rather than the full translation torus. The notebook therefore plots
+representative single-pair modules and a positive control formed from two
+independent frequency pairs, which can expose \(\mathbb T^2\).
 
 ### `rnn_constructed_discrete_SE2_m3.ipynb`
 
@@ -129,12 +149,14 @@ $$
 It separates:
 
 1. a small all-irrep experiment that verifies exact translation, rotation, and mixed composition to floating-point precision; and
-2. the original \(n=50\) spatial experiment using ten high-power irreps, with
-   \(n=8\) retained as an automated-test mode.
+2. the original \(n=50\) spatial experiment using ten high-power irreps.
 
 The truncated experiment includes aligned triangular-lattice encodings, all four
 analytical weight operators, short and long rollouts, separate signal and center
-errors, reconstruction snapshots, and static hidden-unit tuning.
+errors, reconstruction snapshots, static hidden-unit tuning, and
+module-restricted UMAP and persistent-homology plots. The manifold probe fixes
+orientation and varies all \(50^2\) translations, so it specifically tests the
+translation orbit visible within each retained module.
 
 ### `rnn_constructed_discrete_SE3.ipynb`
 
@@ -159,7 +181,9 @@ The three-dimensional encoding makes both position and orientation observable.
 The notebook reports full-signal, decoded-position, and decoded-rotation errors
 separately. It includes allocentric and egocentric encoding diagnostics, all four
 weight operators, a long mixed-motion rollout, reconstruction snapshots, and
-spatial and orientation tuning plots.
+spatial and orientation tuning plots. Its neural-manifold section analyzes
+translation-only and orientation-only probes separately for every retained
+nontrivial module.
 
 These SE(3) figures are deliberately projections of the full signal on
 \(\mathbb Z_n^3\times O\): orthogonal slices summarize spatial volumes, 24-bin
@@ -167,6 +191,9 @@ bars summarize orientation, signed random encodings are displayed through RMS
 energy, and hidden tuning uses both aligned 3D lattice scatters and orientation
 heatmaps. The wrapped trajectory breaks lines at periodic boundaries. No single
 figure is intended to be a lossless view of the four-dimensional signal.
+The manifold plots are explicitly exploratory: 27 spatial samples cannot
+establish continuous \(\mathbb T^3\) topology, and the 24 cubic rotations are a
+finite group rather than a dense sample of \(SO(3)\).
 
 ## Which notebook to use
 

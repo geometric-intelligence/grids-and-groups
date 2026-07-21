@@ -144,6 +144,12 @@ The constructed notebooks distinguish between:
 - a small **all-irrep verification**, which demonstrates exact group composition to floating-point precision; and
 - a larger **Fourier-truncated experiment**, which studies the trade-off between network width and reconstruction quality.
 
+They also analyze module-restricted neural population orbits with UMAP and
+Vietoris–Rips persistent homology. Conjugate irreps are combined where needed,
+fixed-point residuals are checked explicitly, and topology is interpreted as a
+property of a chosen module and group probe—not as a universal topology of the
+finite group.
+
 ## Usage
 
 ### Run a configured training experiment

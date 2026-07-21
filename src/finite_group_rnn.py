@@ -202,9 +202,26 @@ def build_finite_group_rnn(
 ) -> FiniteGroupRNNParams:
     """Build closed-form RNN weights from finite-group irreps.
 
-    ``irrep_selection='all'`` gives the complete construction.
-    ``irrep_selection='power'`` keeps high-power blocks of ``x_allo`` and is a
-    truncated approximation.
+    By default, the construction uses ``group.irreps()`` as the complete irrep
+    list.  Passing ``irreps`` overrides that list, which is useful when irreps
+    have already been materialized or prefiltered.
+
+    The ``irrep_selection`` argument controls which irreps from this list are
+    retained:
+
+    - ``"all"`` uses every available irrep and gives the complete construction.
+    - ``"first"`` keeps the first ``num_irreps`` irreps in list order.
+    - ``"power"`` ranks irreps by Fourier power in ``x_allo`` and keeps a
+      truncated subset.  In this mode, ``x_allo`` is required.
+
+    ``num_irreps`` is a count limit for the ``"first"`` and ``"power"`` modes.
+    ``max_hidden_width`` can further restrict ``"power"`` selection by skipping
+    irreps whose hidden-width contribution would exceed the budget.
+
+    ``q_rho`` is the per-irrep phase/multiplicity parameter in the closed-form
+    construction.  An irrep of dimension ``d`` contributes
+    ``4 * q_rho * d**3`` hidden units; with the default ``q_rho=3``, this is
+    ``12 * d**3`` units per retained irrep.
     """
     all_irreps = list(group.irreps() if irreps is None else irreps)
     x_ego = np.asarray(x_ego)
