@@ -41,6 +41,7 @@ class ManifoldAnalysis:
     """Low-dimensional visualization and persistent-homology result."""
 
     module: ModuleOrbit
+    pca_embedding: np.ndarray
     embedding: np.ndarray
     persistence_diagrams: list[np.ndarray]
     pca_dimension: int
@@ -290,17 +291,23 @@ def analyze_module_orbit(
     max_persistence_points: int = 300,
     max_homology_dimension: int = 2,
     random_state: int = 0,
+    umap_components: int = 2,
 ) -> ManifoldAnalysis:
     """Compute PCA-preprocessed UMAP and Vietoris–Rips persistence."""
+    if umap_components not in (2, 3):
+        raise ValueError("umap_components must be 2 or 3")
     coordinates, pca_dimension, explained_variance = _pca_coordinates(
         module.activity,
         random_state=random_state,
     )
+    pca_embedding = np.zeros((len(coordinates), 3))
+    retained_for_plot = min(coordinates.shape[1], 3)
+    pca_embedding[:, :retained_for_plot] = coordinates[:, :retained_for_plot]
     if len(coordinates) < 3 or pca_dimension == 0:
-        embedding = np.zeros((len(coordinates), 2))
+        embedding = np.zeros((len(coordinates), umap_components))
     else:
         embedding = UMAP(
-            n_components=2,
+            n_components=umap_components,
             n_neighbors=min(30, len(coordinates) - 1),
             min_dist=0.1,
             metric="euclidean",
@@ -326,6 +333,7 @@ def analyze_module_orbit(
     )["dgms"]
     return ManifoldAnalysis(
         module=module,
+        pca_embedding=pca_embedding,
         embedding=embedding,
         persistence_diagrams=diagrams,
         pca_dimension=pca_dimension,
@@ -384,30 +392,77 @@ def plot_manifold_analysis(
     *,
     title: str | None = None,
 ):
-    """Plot one module's UMAP embedding and persistence diagram."""
+    """Plot one module's 3D PCA, UMAP, and persistence diagram."""
     colors = np.asarray(colors)
     if colors.shape != (len(analysis.embedding), 3):
         raise ValueError(
             f"colors must have shape ({len(analysis.embedding)}, 3), "
             f"got {colors.shape}"
         )
-    figure, axes = plt.subplots(1, 2, figsize=(10.5, 4.2), constrained_layout=True)
-    axes[0].scatter(
-        analysis.embedding[:, 0],
-        analysis.embedding[:, 1],
+    if analysis.embedding.shape[1] not in (2, 3):
+        raise ValueError("UMAP embedding must have two or three components")
+    figure = plt.figure(figsize=(14.5, 4.2), constrained_layout=True)
+    pca_ax = figure.add_subplot(1, 3, 1, projection="3d")
+    umap_ax = figure.add_subplot(
+        1,
+        3,
+        2,
+        projection="3d" if analysis.embedding.shape[1] == 3 else None,
+    )
+    persistence_ax = figure.add_subplot(1, 3, 3)
+    axes = np.asarray((pca_ax, umap_ax, persistence_ax), dtype=object)
+    pca_ax.scatter(
+        analysis.pca_embedding[:, 0],
+        analysis.pca_embedding[:, 1],
+        analysis.pca_embedding[:, 2],
         c=colors,
         s=14,
         alpha=0.85,
         linewidths=0,
+        depthshade=False,
     )
-    axes[0].set(
-        xlabel="UMAP 1",
-        ylabel="UMAP 2",
-        title="Module-restricted population orbit",
+    pca_ax.set(
+        xlabel="PC 1",
+        ylabel="PC 2",
+        zlabel="PC 3",
+        title="3D PCA in neural space",
     )
-    axes[0].spines["top"].set_visible(False)
-    axes[0].spines["right"].set_visible(False)
-    _plot_persistence_diagrams(axes[1], analysis.persistence_diagrams)
+    pca_ax.set_box_aspect((1, 1, 1))
+    if analysis.embedding.shape[1] == 3:
+        umap_ax.scatter(
+            analysis.embedding[:, 0],
+            analysis.embedding[:, 1],
+            analysis.embedding[:, 2],
+            c=colors,
+            s=14,
+            alpha=0.85,
+            linewidths=0,
+            depthshade=False,
+        )
+        umap_ax.set(
+            xlabel="UMAP 1",
+            ylabel="UMAP 2",
+            zlabel="UMAP 3",
+            title="3D UMAP",
+        )
+        umap_ax.set_box_aspect((1, 1, 1))
+    else:
+        umap_ax.scatter(
+            analysis.embedding[:, 0],
+            analysis.embedding[:, 1],
+            c=colors,
+            s=14,
+            alpha=0.85,
+            linewidths=0,
+        )
+        umap_ax.set(
+            xlabel="UMAP 1",
+            ylabel="UMAP 2",
+            title="UMAP",
+        )
+        umap_ax.spines["top"].set_visible(False)
+        umap_ax.spines["right"].set_visible(False)
+    _plot_persistence_diagrams(persistence_ax, analysis.persistence_diagrams)
     heading = analysis.module.label if title is None else title
     figure.suptitle(
         f"{heading}; PCA d={analysis.pca_dimension}, "

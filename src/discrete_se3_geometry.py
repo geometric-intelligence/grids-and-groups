@@ -261,9 +261,12 @@ def plot_pose_trajectory(
     exact_positions: np.ndarray,
     predicted_positions: np.ndarray,
     *,
+    exact_rotations: np.ndarray | None = None,
+    predicted_rotations: np.ndarray | None = None,
+    orientation_stride: int | None = None,
     title: str = "Spatial pose trajectory",
 ):
-    """Overlay exact and decoded wrapped trajectories on the cubic lattice."""
+    """Overlay wrapped trajectories and optional allocentric orientation frames."""
     exact_positions = np.asarray(exact_positions)
     predicted_positions = np.asarray(predicted_positions)
     expected_shape = (exact_positions.shape[0], 3)
@@ -340,6 +343,41 @@ def plot_pose_trajectory(
         linewidths=0.7,
         label="end",
     )
+    if (exact_rotations is None) != (predicted_rotations is None):
+        raise ValueError(
+            "exact_rotations and predicted_rotations must be supplied together"
+        )
+    if exact_rotations is not None:
+        exact_rotations = np.asarray(exact_rotations, dtype=int)
+        predicted_rotations = np.asarray(predicted_rotations, dtype=int)
+        if exact_rotations.shape != (len(exact_positions),):
+            raise ValueError("exact_rotations must contain one value per trajectory step")
+        if predicted_rotations.shape != exact_rotations.shape:
+            raise ValueError("predicted_rotations must match exact_rotations")
+        if orientation_stride is None:
+            orientation_stride = max(1, len(exact_positions) // 10)
+        if orientation_stride < 1:
+            raise ValueError("orientation_stride must be positive")
+        frame_indices = np.arange(0, len(exact_positions), orientation_stride)
+        axis_colors = ("#D62728", "#2CA02C", "#1F77B4")
+        for positions, rotations, linestyle, alpha in (
+            (exact_positions, exact_rotations, "-", 0.9),
+            (predicted_positions, predicted_rotations, "--", 0.65),
+        ):
+            for sample_index in frame_indices:
+                origin = positions[sample_index]
+                rotation = group.rotation_matrix(rotations[sample_index])
+                for axis_index, axis_color in enumerate(axis_colors):
+                    direction = rotation[:, axis_index]
+                    ax.plot(
+                        [origin[0], origin[0] + 0.32 * direction[0]],
+                        [origin[1], origin[1] + 0.32 * direction[1]],
+                        [origin[2], origin[2] + 0.32 * direction[2]],
+                        color=axis_color,
+                        linestyle=linestyle,
+                        linewidth=1.2,
+                        alpha=alpha,
+                    )
     ax.set(
         xlim=(-0.25, group.n - 0.75),
         ylim=(-0.25, group.n - 0.75),
