@@ -8,7 +8,6 @@ from src.groups.group import Group
 from src.groups.irrep import IrreducibleRepresentation, LazyIrreducibleRepresentation
 from src.groups.oh import OctahedralGroup
 from src.groups.znxzn_cm import DiscreteSE2Group
-from src.groups.znxznxzn_a4 import DiscreteSE3A4Group
 from src.groups.znxznxzn_oh import DiscreteSE3Group
 
 __all__ = [
@@ -21,7 +20,6 @@ __all__ = [
     "OctahedralGroup",
     "IcosahedralGroup",
     "DiscreteSE2Group",
-    "DiscreteSE3A4Group",
     "DiscreteSE3Group",
     "make_group",
 ]
@@ -42,12 +40,10 @@ def make_group(group_name: str, config: dict) -> Group:
         return IcosahedralGroup()
     if group_name == "znxzn_cm":
         return DiscreteSE2Group(n=data["p"], m=data["m"])
-    if group_name == "znxznxzn_a4":
-        return DiscreteSE3A4Group(n=data["p"])
     if group_name == "znxznxzn_oh":
         return DiscreteSE3Group(n=data["p"])
     raise ValueError(
         f"Unknown group_name '{group_name}'. "
         "Must be one of: 'cn', 'cnxcn', 'dihedral', 'octahedral', 'A5', "
-        "'znxzn_cm', 'znxznxzn_a4', 'znxznxzn_oh'."
+        "'znxzn_cm', 'znxznxzn_oh'."
     )

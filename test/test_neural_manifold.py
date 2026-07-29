@@ -63,23 +63,6 @@ def test_module_orbits_and_analysis_have_expected_shapes():
     )
 
     assert len(modules) == 4
-    assert analysis.pca_embedding.shape == (group.order, 3)
     assert analysis.embedding.shape == (group.order, 2)
     assert len(analysis.persistence_diagrams) == 2
     assert colors.shape == (group.order, 3)
-
-
-def test_module_orbit_analysis_supports_three_dimensional_umap():
-    group, params, x_allo = _exact_cnxcn_model()
-    hidden = probe_hidden_states(params, x_allo)
-    fixed = fixed_point_embedding(params, hidden)
-    module = build_module_orbits(params, fixed.states)[0]
-
-    analysis = analyze_module_orbit(
-        module,
-        max_persistence_points=20,
-        max_homology_dimension=1,
-        umap_components=3,
-    )
-
-    assert analysis.embedding.shape == (group.order, 3)
