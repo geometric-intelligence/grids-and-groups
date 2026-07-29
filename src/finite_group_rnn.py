@@ -136,14 +136,28 @@ def _amplitude_factors(
     q_rho: int,
     group_order: int,
     mode: str,
+    multipliers: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> tuple[float, float, float]:
     product = irrep_dim / (q_rho * group_order)
     if mode == "balanced":
         amplitude = product ** (1 / 3)
-        return amplitude, amplitude, amplitude
-    if mode == "put_on_drive":
-        return 1.0, product, 1.0
-    raise ValueError("amplitude_mode must be 'balanced' or 'put_on_drive'")
+        baseline = np.asarray((amplitude, amplitude, amplitude))
+    elif mode == "put_on_drive":
+        baseline = np.asarray((1.0, product, 1.0))
+    else:
+        raise ValueError("amplitude_mode must be 'balanced' or 'put_on_drive'")
+
+    multipliers_array = np.asarray(multipliers, dtype=float)
+    if multipliers_array.shape != (3,):
+        raise ValueError("amplitude_multipliers must contain exactly three values")
+    if not np.all(np.isfinite(multipliers_array)) or np.any(multipliers_array <= 0):
+        raise ValueError("amplitude_multipliers must be finite and positive")
+    if not np.isclose(np.prod(multipliers_array), 1.0):
+        raise ValueError(
+            "amplitude_multipliers must have product one to preserve the "
+            "closed-form RNN identity"
+        )
+    return tuple(baseline * multipliers_array)
 
 
 def _matrix_unit(dim: int, row: int, column: int) -> np.ndarray:
@@ -171,6 +185,7 @@ class FiniteGroupRNNParams:
     W_out: np.ndarray
     metadata: list[dict]
     amplitude_mode: str
+    amplitude_multipliers: tuple[float, float, float]
     W_mix: np.ndarray | None = None
 
     @property
@@ -192,6 +207,7 @@ def build_finite_group_rnn(
     x_allo: np.ndarray | None = None,
     q_rho: int = 3,
     amplitude_mode: str = "balanced",
+    amplitude_multipliers: tuple[float, float, float] = (1.0, 1.0, 1.0),
     irrep_selection: str = "all",
     num_irreps: int | None = None,
     max_hidden_width: int | None = None,
@@ -222,6 +238,10 @@ def build_finite_group_rnn(
     construction.  An irrep of dimension ``d`` contributes
     ``4 * q_rho * d**3`` hidden units; with the default ``q_rho=3``, this is
     ``12 * d**3`` units per retained irrep.
+
+    ``amplitude_multipliers`` rescales the baseline
+    ``(A_u, A_v, A_w)`` factors. Its three entries must be positive and have
+    product one so the closed-form reconstruction identity remains unchanged.
     """
     all_irreps = list(group.irreps() if irreps is None else irreps)
     x_ego = np.asarray(x_ego)
@@ -270,7 +290,11 @@ def build_finite_group_rnn(
             )
         xhat_inv_dagger = np.linalg.inv(xhat.conj().T)
         amplitude_in, amplitude_drive, amplitude_out = _amplitude_factors(
-            dim, q_rho, group.order, amplitude_mode
+            dim,
+            q_rho,
+            group.order,
+            amplitude_mode,
+            amplitude_multipliers,
         )
 
         for eps1, eps2 in sign_pairs:
@@ -334,6 +358,7 @@ def build_finite_group_rnn(
         W_mix=W_mix,
         metadata=metadata,
         amplitude_mode=amplitude_mode,
+        amplitude_multipliers=tuple(float(value) for value in amplitude_multipliers),
     )
 
 

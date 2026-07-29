@@ -115,10 +115,11 @@ def gaussian_bump(
     *,
     center: tuple[int, int] = (2, 2),
     sigma: float = 1.2,
+    orientation_weights: np.ndarray | None = None,
     amplitude: float = 1.0,
     baseline: float = 0.0,
 ) -> np.ndarray:
-    """Return a spatial Gaussian copied across every rotation slice."""
+    """Return a periodic Gaussian with an optional orientation profile."""
     spatial = np.empty((group.n, group.n), dtype=float)
     for x in range(group.n):
         for y in range(group.n):
@@ -126,13 +127,37 @@ def gaussian_bump(
             spatial[x, y] = baseline + amplitude * np.exp(
                 -0.5 * distance_squared / sigma**2
             )
-    return tensor_to_signal(group, np.repeat(spatial[None, :, :], group.m, axis=0))
+    if orientation_weights is None:
+        orientation_weights = np.ones(group.m)
+    orientation_weights = np.asarray(orientation_weights, dtype=float)
+    if orientation_weights.shape != (group.m,):
+        raise ValueError(
+            f"orientation_weights must have shape ({group.m},), "
+            f"got {orientation_weights.shape}"
+        )
+    tensor = baseline + orientation_weights[:, None, None] * (spatial - baseline)
+    return tensor_to_signal(group, tensor)
 
 
 def decode_spatial_argmax(group, signal: np.ndarray) -> tuple[int, int]:
     """Decode position after summing the signal over rotations."""
     spatial = spatial_marginal(group, signal)
     return tuple(int(value) for value in np.unravel_index(np.argmax(spatial), spatial.shape))
+
+
+def orientation_marginal(group, signal: np.ndarray) -> np.ndarray:
+    """Sum a group signal over translation coordinates."""
+    return signal_to_tensor(group, signal).sum(axis=(1, 2))
+
+
+def decode_orientation_argmax(group, signal: np.ndarray) -> int:
+    """Decode the most active discrete orientation."""
+    return int(np.argmax(orientation_marginal(group, signal)))
+
+
+def decode_pose(group, signal: np.ndarray) -> tuple[int, int, int]:
+    """Decode position and orientation marginals as one pose."""
+    return (*decode_spatial_argmax(group, signal), decode_orientation_argmax(group, signal))
 
 
 def transformed_center(
@@ -147,6 +172,15 @@ def transformed_center(
         (translation_x + center_x) % group.n,
         (translation_y + center_y) % group.n,
     )
+
+
+def transformed_pose(
+    group,
+    element: int,
+    original_pose: tuple[int, int, int],
+) -> tuple[int, int, int]:
+    """Apply an element to a pose using the semidirect-product law."""
+    return group.decode(group.compose(element, group.encode(*original_pose)))
 
 
 def plot_lattice_scalar(
@@ -277,10 +311,11 @@ def make_momentum_motion_sequence(
     turn_probability: float = 0.18,
     stay_probability: float = 0.04,
     start_xy: tuple[int, int] | None = None,
+    initial_pose: tuple[int, int, int] | None = None,
     margin: int = 2,
     max_resample: int = 20,
 ) -> np.ndarray:
-    """Generate local relative motions while keeping the displayed path in bounds."""
+    """Generate local relative motions while keeping the displayed pose in bounds."""
     rng = np.random.default_rng(seed)
     n = group.n
     if start_xy is None:
@@ -297,7 +332,16 @@ def make_momentum_motion_sequence(
             and margin <= y_new <= n - 1 - margin
         )
 
-    sequence = [group.encode(x, y, 0)]
+    heading = 0 if initial_pose is None else int(initial_pose[2]) % group.m
+    if initial_pose is None:
+        cumulative = group.encode(x, y, heading)
+    else:
+        target_pose = group.encode(x, y, heading)
+        cumulative = group.compose(
+            target_pose,
+            group.inverse(group.encode(*initial_pose)),
+        )
+    sequence = [cumulative]
     direction_index = int(rng.integers(0, len(directions)))
     for _ in range(steps - 1):
         if rng.random() < stay_probability:
@@ -322,8 +366,21 @@ def make_momentum_motion_sequence(
                 dx, dy = 0, 0
         x += int(dx)
         y += int(dy)
-        rotation = int(rng.choice([0, 0, 0, 1, 2])) if include_rotations else 0
-        sequence.append(group.encode(int(dx), int(dy), rotation))
+        rotation_step = (
+            int(rng.choice([0, 0, 0, 1, 2])) if include_rotations else 0
+        )
+        heading = (heading + rotation_step) % group.m
+        if initial_pose is None:
+            relative = group.encode(int(dx), int(dy), rotation_step)
+        else:
+            target_pose = group.encode(x, y, heading)
+            next_cumulative = group.compose(
+                target_pose,
+                group.inverse(group.encode(*initial_pose)),
+            )
+            relative = group.compose(next_cumulative, group.inverse(cumulative))
+            cumulative = next_cumulative
+        sequence.append(relative)
     return np.asarray(sequence, dtype=int)
 
 
@@ -378,31 +435,25 @@ def plot_lattice_trajectory(
     exact_points: np.ndarray,
     predicted_points: np.ndarray,
     *,
+    exact_rotations: np.ndarray | None = None,
+    predicted_rotations: np.ndarray | None = None,
+    orientation_stride: int | None = None,
     title: str = "Bump center trajectory",
     coordinate_mode: str = "offset",
     save_path: str | None = None,
 ):
-    """Plot a tracked trajectory using the original neutral-lattice aesthetic."""
-    figure, ax = plt.subplots(figsize=(7.4, 5.4), constrained_layout=True)
+    """Plot position tracks with optional exact and decoded orientation arrows."""
+    figure, ax = plt.subplots(figsize=(8.8, 5.8), constrained_layout=True)
     x, y = lattice_coordinates(group.n, mode=coordinate_mode)
-    patches = [
-        RegularPolygon(
-            (center_x, center_y),
-            numVertices=6,
-            radius=1 / np.sqrt(3),
-            orientation=np.pi / 6,
-        )
-        for center_x, center_y in zip(x.ravel(), y.ravel())
-    ]
-    ax.add_collection(
-        PatchCollection(
-            patches,
-            facecolor=(0.92, 0.92, 0.92, 1.0),
-            edgecolor=(1.0, 1.0, 1.0, 1.0),
-            linewidth=0.7,
-        )
+    ax.scatter(
+        x,
+        y,
+        s=9,
+        color=(0.80, 0.80, 0.80),
+        linewidths=0,
+        zorder=0,
     )
-    radius = 1 / np.sqrt(3)
+    radius = 0.5
     ax.set_xlim(float(x.min()) - radius, float(x.max()) + radius)
     ax.set_ylim(float(y.min()) - radius, float(y.max()) + radius)
 
@@ -412,32 +463,31 @@ def plot_lattice_trajectory(
     predicted_xy = lattice_path_coordinates(
         predicted_points, group.n, mode=coordinate_mode
     )
-    ax.scatter(
-        exact_xy[:, 0],
-        exact_xy[:, 1],
-        s=40,
-        color=TRACK_COLOR,
-        alpha=0.40,
-        linewidths=0,
-        label="true bump path",
+    ax.plot(
+        predicted_xy[:, 0],
+        predicted_xy[:, 1],
+        "k--",
+        linewidth=3.0,
+        alpha=0.55,
+        label="predicted center",
         zorder=2,
     )
     ax.plot(
         exact_xy[:, 0],
         exact_xy[:, 1],
         color=TRACK_COLOR,
-        linewidth=2.4,
+        linewidth=1.8,
         alpha=0.95,
-        label="true bump center",
+        label="true center",
         zorder=3,
     )
-    ax.plot(
-        predicted_xy[:, 0],
-        predicted_xy[:, 1],
-        "k--",
-        linewidth=2.0,
-        alpha=0.95,
-        label="predicted theory peak",
+    ax.scatter(
+        exact_xy[:, 0],
+        exact_xy[:, 1],
+        s=12,
+        color=TRACK_COLOR,
+        alpha=0.25,
+        linewidths=0,
         zorder=4,
     )
     ax.scatter(
@@ -460,9 +510,72 @@ def plot_lattice_trajectory(
         label="end",
         zorder=6,
     )
+    if (exact_rotations is None) != (predicted_rotations is None):
+        raise ValueError(
+            "exact_rotations and predicted_rotations must be supplied together"
+        )
+    if exact_rotations is not None:
+        exact_rotations = np.asarray(exact_rotations, dtype=int)
+        predicted_rotations = np.asarray(predicted_rotations, dtype=int)
+        if exact_rotations.shape != (len(exact_points),):
+            raise ValueError("exact_rotations must contain one value per trajectory step")
+        if predicted_rotations.shape != exact_rotations.shape:
+            raise ValueError("predicted_rotations must match exact_rotations")
+        if orientation_stride is None:
+            orientation_stride = max(1, len(exact_points) // 14)
+        if orientation_stride < 1:
+            raise ValueError("orientation_stride must be positive")
+        arrow_indices = np.arange(0, len(exact_points), orientation_stride)
+
+        def display_directions(rotations):
+            axial = np.asarray(
+                [
+                    group.rotation_matrix(int(rotation)) @ np.asarray((1, 0))
+                    for rotation in rotations
+                ]
+            )
+            return np.column_stack(
+                (axial[:, 0] + 0.5 * axial[:, 1], np.sqrt(3) * axial[:, 1] / 2)
+            )
+
+        exact_directions = display_directions(exact_rotations[arrow_indices])
+        predicted_directions = display_directions(predicted_rotations[arrow_indices])
+        for positions, directions, color, linestyle, linewidth, alpha in (
+            (
+                predicted_xy[arrow_indices],
+                predicted_directions,
+                "black",
+                "--",
+                2.0,
+                0.60,
+            ),
+            (
+                exact_xy[arrow_indices],
+                exact_directions,
+                TRACK_COLOR,
+                "-",
+                1.1,
+                1.0,
+            ),
+        ):
+            for position, direction in zip(positions, directions):
+                ax.annotate(
+                    "",
+                    xy=position + 0.62 * direction,
+                    xytext=position,
+                    arrowprops={
+                        "arrowstyle": "-|>",
+                        "color": color,
+                        "linestyle": linestyle,
+                        "linewidth": linewidth,
+                        "mutation_scale": 9,
+                        "alpha": alpha,
+                    },
+                    zorder=7,
+                )
     ax.set(aspect="equal", xticks=[], yticks=[], title=title)
     ax.set_frame_on(False)
-    ax.legend(frameon=False, loc="upper right", bbox_to_anchor=(0.94, 0.94))
+    ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(1.02, 1.0))
     if save_path is not None:
         figure.savefig(save_path, bbox_inches="tight", dpi=300)
     return ax
