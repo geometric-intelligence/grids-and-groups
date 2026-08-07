@@ -4,12 +4,13 @@ from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from ripser import ripser
 from sklearn.decomposition import PCA
 from sklearn.metrics import pairwise_distances
 from umap import UMAP
 
-from src.finite_group_rnn import squared_relu
+from src.finite_group_rnn import FiniteGroupRNN, squared_relu
 
 
 @dataclass
@@ -50,37 +51,64 @@ class ManifoldAnalysis:
 
 
 def fixed_point_embedding(
-    params,
+    model: FiniteGroupRNN,
     initial_states: np.ndarray,
     *,
     tolerance: float = 1e-10,
     max_iterations: int = 50,
 ) -> FixedPointEmbedding:
     """Iterate identity-drive recurrence until each hidden state is fixed."""
-    states = np.asarray(initial_states, dtype=float).copy()
-    if states.ndim != 2 or states.shape[1] != params.hidden_dim:
-        raise ValueError(
-            f"initial_states must have shape (samples, {params.hidden_dim}), "
-            f"got {states.shape}"
-        )
-    group = params.group
-    identity_drive = params.W_drive @ group.left_action(
-        group.identity(), params.x_ego
+    states = torch.as_tensor(
+        initial_states,
+        dtype=model.W_in.dtype,
+        device=model.W_in.device,
     )
-    residuals = np.full(len(states), np.inf)
+    if states.ndim != 2 or states.shape[1] != model.hidden_dim:
+        raise ValueError(
+            f"initial_states must have shape (samples, {model.hidden_dim}), "
+            f"got {tuple(states.shape)}"
+        )
+    group = model.group
+    identity_signal = group.left_action(
+        group.identity(), model.x_ego.detach().cpu().numpy()
+    )
+    identity_drive = torch.nn.functional.linear(
+        torch.as_tensor(
+            identity_signal,
+            dtype=model.W_in.dtype,
+            device=model.W_in.device,
+        ),
+        model.W_drive,
+    )
+    residuals = torch.full(
+        (len(states),),
+        torch.inf,
+        dtype=states.dtype,
+        device=states.device,
+    )
     for iteration in range(1, max_iterations + 1):
         updated = squared_relu(
-            params.apply_mix(states.T).T + identity_drive[None, :]
+            model.apply_mix(states) + identity_drive.unsqueeze(0)
         )
-        difference = np.linalg.norm(updated - states, axis=1)
-        scale = np.maximum(np.linalg.norm(states, axis=1), 1.0)
+        difference = torch.linalg.vector_norm(updated - states, dim=1)
+        scale = torch.clamp(torch.linalg.vector_norm(states, dim=1), min=1.0)
         residuals = difference / scale
         states = updated
-        if np.max(residuals, initial=0.0) <= tolerance:
-            return FixedPointEmbedding(states, residuals, iteration, True)
-        if not np.all(np.isfinite(states)):
+        if torch.max(residuals).item() <= tolerance:
+            return FixedPointEmbedding(
+                states.detach().cpu().numpy(),
+                residuals.detach().cpu().numpy(),
+                iteration,
+                True,
+            )
+        if not torch.all(torch.isfinite(states)):
             break
-    return FixedPointEmbedding(states, residuals, iteration, False)
+    return FixedPointEmbedding(
+        states.detach().cpu().numpy(),
+        residuals.detach().cpu().numpy(),
+        iteration,
+        False,
+    )
 
 
 def _selected_characters(params, *, max_samples: int = 256) -> np.ndarray:

@@ -184,7 +184,7 @@ class TestActions:
             group.left_action(group.compose(second, first), signal),
         )
 
-    def test_cumulative_product_uses_left_action_order(self):
+    def test_cumulative_product_uses_body_frame_order(self):
         group = DiscreteSE3A4Group(2)
         sequence = [
             group.encode(1, 0, 0, 0),
@@ -193,7 +193,7 @@ class TestActions:
         ]
         expected = group.identity()
         for element in sequence:
-            expected = group.compose(element, expected)
+            expected = group.compose(expected, element)
         assert group.cumulative_product(sequence) == expected
 
 

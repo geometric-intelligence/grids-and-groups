@@ -1,0 +1,42 @@
+# ============================================================================
+# Configuration: Cyclic Group C_10
+# ============================================================================
+# C10 has order 10. Uses 1D onehot template with sequence length k=3.
+
+data:
+  group_name: cn              # Group family: 'cn' | 'cnxcn' | 'dihedral' | 'octahedral' | 'A5'
+  p: 10                       # Cyclic group order (cn only)
+  k: 3                        # Sequence length (number of group elements to compose)
+  batch_size: 128             # Training batch size
+  seed: 10                    # Random seed for reproducibility
+  template_type: onehot       # Template type: 'onehot' | 'custom_fourier'
+  mode: exhaustive            # Dataset mode: 'sampled' | 'exhaustive'
+  num_samples: 1000           # Number of samples (used when mode='sampled')
+
+model:
+  model_type: TwoLayerMLP     # Model architecture: 'QuadraticRNN' | 'TwoLayerMLP'
+  nonlinearity: power          # Activation: 'power' (k-th power)
+  hidden_dim: 300             # Hidden layer width (hidden_factor=30 * group_size=10)
+  init_scale: 0.01            # Weight initialization scale
+  return_all_outputs: false   # true = seq-to-seq, false = seq-to-one (final output only)
+
+training:
+  mode: offline               # Training mode: 'online' (fresh samples) | 'offline' (fixed dataset)
+  epochs: 1000                # Number of training epochs (offline mode)
+  num_steps: 100              # Number of training steps (online mode)
+  optimizer: per_neuron       # Optimizer: 'adam' | 'hybrid' | 'per_neuron'
+  learning_rate: 0.01         # Base learning rate
+  betas: [0.9, 0.999]        # Adam/hybrid beta parameters
+  weight_decay: 0.0           # L2 regularization strength
+  degree: null                # Homogeneity degree for 'per_neuron' (null = defaults to model.k)
+  scaling_factor: -3          # Per-neuron norm exponent for 'hybrid' optimizer only
+  grad_clip: 0.1              # Maximum gradient norm (0 = disabled)
+  verbose_interval: 100       # Print loss every N epochs/steps
+  save_param_interval: 10     # Save parameter snapshot every N epochs/steps
+  reduction_threshold: null   # Early stopping: stop at this loss-reduction fraction (null = disabled)
+  resume_from: null            # Run dir → checkpoints/final_model.pt, or path to .pt state_dict; optimizer starts fresh
+
+device: cuda:0                # Device: 'cuda:N' | 'cpu'
+
+analysis:
+  checkpoints: [0.0, 1.0]    # Fractions of training at which to run analysis (0.0 = start, 1.0 = end)

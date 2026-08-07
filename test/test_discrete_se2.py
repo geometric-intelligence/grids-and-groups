@@ -185,7 +185,7 @@ class TestLeftAction:
         sequence = group.elements()[:3]
         expected = group.identity()
         for element in sequence:
-            expected = group.compose(element, expected)
+            expected = group.compose(expected, element)
         assert group.cumulative_product(sequence) == expected
 
 

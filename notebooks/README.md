@@ -3,33 +3,39 @@
 The notebooks are organized by how the recurrent network is obtained:
 
 ```text
-notebooks/
-├── trained_networks/
-│   ├── sequential_cnxcn.ipynb
-│   ├── discrete_se2.ipynb
-│   ├── discrete_se2_rnn.ipynb
-│   ├── discrete_se2_analysis.ipynb
-│   └── discrete_se2_local_composition.ipynb
-└── constructed_networks/
-    ├── rnn_constructed_cnxcn.ipynb
-    ├── rnn_constructed_discrete_SE2_m3.ipynb
-    └── rnn_constructed_discrete_SE3.ipynb
+grids-and-groups/
+├── notebooks/constructed_networks/
+│   ├── rnn_constructed_cnxcn.ipynb
+│   ├── rnn_constructed_discrete_SE2_m3.ipynb
+│   ├── rnn_constructed_discrete_SE3.ipynb
+│   └── rnn_constructed_discrete_SE3_A4.ipynb
+└── trained_networks/notebooks/
+    ├── sequential_cnxcn.ipynb
+    ├── discrete_se2.ipynb
+    ├── discrete_se2_rnn.ipynb
+    ├── discrete_se2_analysis.ipynb
+    └── discrete_se2_local_composition.ipynb
 ```
 
-The notebooks in `trained_networks/` learn group composition from data using PyTorch. The notebooks in `constructed_networks/` derive the weights analytically from finite-group irreducible representations; no gradient training is used.
+The notebooks in `trained_networks/notebooks/` learn group composition from data using
+PyTorch. The notebooks in `notebooks/constructed_networks/` derive the weights
+analytically from finite-group irreducible representations and load them into a
+fixed-weight PyTorch module. Its weights are buffers rather than trainable
+parameters, so no gradient training or optimization is used.
 
 ## Overview
 
 | Notebook | Method | Purpose |
 | --- | --- | --- |
-| [`trained_networks/sequential_cnxcn.ipynb`](trained_networks/sequential_cnxcn.ipynb) | Trained QuadraticRNN | Sequential composition on \(C_3\times C_3\) with sequence length three |
-| [`trained_networks/discrete_se2.ipynb`](trained_networks/discrete_se2.ipynb) | Trained MLP and QuadraticRNN | Initial discrete-SE(2) prototype and architecture comparison |
-| [`trained_networks/discrete_se2_rnn.ipynb`](trained_networks/discrete_se2_rnn.ipynb) | Trained QuadraticRNN | Main end-to-end discrete-SE(2) training experiment |
-| [`trained_networks/discrete_se2_analysis.ipynb`](trained_networks/discrete_se2_analysis.ipynb) | Post-hoc analysis | Load and analyze saved discrete-SE(2) runs without retraining |
-| [`trained_networks/discrete_se2_local_composition.ipynb`](trained_networks/discrete_se2_local_composition.ipynb) | Trained QuadraticRNN | Test whether local generator compositions generalize globally |
+| [`trained_networks/notebooks/sequential_cnxcn.ipynb`](../trained_networks/notebooks/sequential_cnxcn.ipynb) | Trained QuadraticRNN | Sequential composition on \(C_3\times C_3\) with sequence length three |
+| [`trained_networks/notebooks/discrete_se2.ipynb`](../trained_networks/notebooks/discrete_se2.ipynb) | Trained MLP and QuadraticRNN | Initial discrete-SE(2) prototype and architecture comparison |
+| [`trained_networks/notebooks/discrete_se2_rnn.ipynb`](../trained_networks/notebooks/discrete_se2_rnn.ipynb) | Trained QuadraticRNN | Main end-to-end discrete-SE(2) training experiment |
+| [`trained_networks/notebooks/discrete_se2_analysis.ipynb`](../trained_networks/notebooks/discrete_se2_analysis.ipynb) | Post-hoc analysis | Load and analyze saved discrete-SE(2) runs without retraining |
+| [`trained_networks/notebooks/discrete_se2_local_composition.ipynb`](../trained_networks/notebooks/discrete_se2_local_composition.ipynb) | Trained QuadraticRNN | Test whether local generator compositions generalize globally |
 | [`constructed_networks/rnn_constructed_cnxcn.ipynb`](constructed_networks/rnn_constructed_cnxcn.ipynb) | Closed-form QuadraticRNN | Exact and Fourier-truncated translations on \(C_n\times C_n\) |
 | [`constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb`](constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb) | Closed-form QuadraticRNN | Exact and Fourier-truncated constructions on \(\mathbb Z_n^2\rtimes C_3\) |
 | [`constructed_networks/rnn_constructed_discrete_SE3.ipynb`](constructed_networks/rnn_constructed_discrete_SE3.ipynb) | Closed-form QuadraticRNN | Exact and cost-aware truncated constructions on \(\mathbb Z_n^3\rtimes O\) |
+| [`constructed_networks/rnn_constructed_discrete_SE3_A4.ipynb`](constructed_networks/rnn_constructed_discrete_SE3_A4.ipynb) | Closed-form QuadraticRNN | Exact and cost-aware truncated constructions with tetrahedral rotations |
 
 ## Trained networks
 
@@ -85,9 +91,9 @@ The model fits local compositions but does not infer global composition.
 
 The constructed notebooks share the group-agnostic implementation in `src/finite_group_rnn.py`. Geometry and decoding live in:
 
-- `src/cnxcn_geometry.py`;
-- `src/discrete_se2_geometry.py`;
-- `src/discrete_se3_geometry.py`;
+- `src/geometry/cnxcn/`;
+- `src/geometry/discrete_se2/`;
+- `src/geometry/discrete_se3/`;
 - `src/neural_manifold.py`.
 
 Recurrent mixing is kept factored as
@@ -98,7 +104,7 @@ $$
 
 which avoids allocating a dense hidden-by-hidden matrix.
 
-All three constructed notebooks also evaluate module-restricted neural orbits
+All four constructed notebooks also evaluate module-restricted neural orbits
 
 $$
 \mathcal M_{\rho,x}
@@ -197,11 +203,11 @@ finite group rather than a dense sample of \(SO(3)\).
 
 ## Which notebook to use
 
-- For a simple sequential product-group example, use `trained_networks/sequential_cnxcn.ipynb`.
-- For the original MLP/RNN comparison, use `trained_networks/discrete_se2.ipynb`.
-- For end-to-end discrete-SE(2) training, use `trained_networks/discrete_se2_rnn.ipynb`.
-- For analysis of saved runs, use `trained_networks/discrete_se2_analysis.ipynb`.
-- For local-to-global generalization, use `trained_networks/discrete_se2_local_composition.ipynb`.
+- For a simple sequential product-group example, use `trained_networks/notebooks/sequential_cnxcn.ipynb`.
+- For the original MLP/RNN comparison, use `trained_networks/notebooks/discrete_se2.ipynb`.
+- For end-to-end discrete-SE(2) training, use `trained_networks/notebooks/discrete_se2_rnn.ipynb`.
+- For analysis of saved runs, use `trained_networks/notebooks/discrete_se2_analysis.ipynb`.
+- For local-to-global generalization, use `trained_networks/notebooks/discrete_se2_local_composition.ipynb`.
 - For the analytical discrete-SE(2) construction, use `constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb`.
 - For the analytical discrete-SE(3) construction, use `constructed_networks/rnn_constructed_discrete_SE3.ipynb`.
 

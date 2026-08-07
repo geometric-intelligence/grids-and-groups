@@ -29,10 +29,15 @@ This repository studies path integration as **sequential group composition**. A 
 $$
 \left(x_{\mathrm{allo}},\; g_1\!\cdot x_{\mathrm{ego}},\ldots,g_T\!\cdot x_{\mathrm{ego}}\right)
 \longmapsto
-(g_T\cdots g_1)\!\cdot x_{\mathrm{allo}}.
+(g_1\cdots g_T)\!\cdot x_{\mathrm{allo}}.
 $$
 
-The group \(G\) specifies the geometry of the navigated space. Circular groups model head direction, product groups model periodic translations, and semidirect products model coupled rotations and translations in two and three dimensions.
+Here the dot denotes the right-regular, body-frame action
+\((g\!\cdot x)[h]=x[hg^{-1}]\): a one-hot state at \(s\) moves to \(sg\).
+Thus an incoming displacement is interpreted in the agent's current frame. The
+group \(G\) specifies the geometry of the navigated space. Circular groups model
+head direction, product groups model periodic translations, and semidirect
+products model coupled rotations and translations in two and three dimensions.
 
 The repository supports two complementary approaches:
 
@@ -43,7 +48,7 @@ The repository supports two complementary approaches:
 
 ### Algebraic formulation
 
-For a finite group \(G\), an encoding \(x\in\mathbb R^{|G|}\) is equivalently a scalar function \(x:G\to\mathbb R\). Group elements act by permuting its coordinates through the regular action.
+For a finite group \(G\), an encoding \(x\in\mathbb R^{|G|}\) is equivalently a scalar function \(x:G\to\mathbb R\). By default, group elements permute its coordinates through the right-regular action. The implementation uses the equivalent left-regular action of the opposite group, whose irreps are \(\rho^{\mathrm{op}}(g)=\rho(g)^\top\).
 
 The recurrent model uses a squared-ReLU activation,
 
@@ -125,11 +130,11 @@ Notebooks are divided into trained and analytically constructed networks. See [`
 
 | Notebook | Purpose |
 | --- | --- |
-| [`sequential_cnxcn.ipynb`](notebooks/trained_networks/sequential_cnxcn.ipynb) | Train a QuadraticRNN on length-three composition in \(C_3\times C_3\) |
-| [`discrete_se2.ipynb`](notebooks/trained_networks/discrete_se2.ipynb) | Compare an MLP and QuadraticRNN on discrete SE(2) |
-| [`discrete_se2_rnn.ipynb`](notebooks/trained_networks/discrete_se2_rnn.ipynb) | Main end-to-end discrete-SE(2) training experiment |
-| [`discrete_se2_analysis.ipynb`](notebooks/trained_networks/discrete_se2_analysis.ipynb) | Analyze checkpoints and parameter histories without retraining |
-| [`discrete_se2_local_composition.ipynb`](notebooks/trained_networks/discrete_se2_local_composition.ipynb) | Test whether locally trained composition generalizes globally |
+| [`sequential_cnxcn.ipynb`](trained_networks/notebooks/sequential_cnxcn.ipynb) | Train a QuadraticRNN on length-three composition in \(C_3\times C_3\) |
+| [`discrete_se2.ipynb`](trained_networks/notebooks/discrete_se2.ipynb) | Compare an MLP and QuadraticRNN on discrete SE(2) |
+| [`discrete_se2_rnn.ipynb`](trained_networks/notebooks/discrete_se2_rnn.ipynb) | Main end-to-end discrete-SE(2) training experiment |
+| [`discrete_se2_analysis.ipynb`](trained_networks/notebooks/discrete_se2_analysis.ipynb) | Analyze checkpoints and parameter histories without retraining |
+| [`discrete_se2_local_composition.ipynb`](trained_networks/notebooks/discrete_se2_local_composition.ipynb) | Test whether locally trained composition generalizes globally |
 
 ### Constructed networks
 
@@ -138,6 +143,7 @@ Notebooks are divided into trained and analytically constructed networks. See [`
 | [`rnn_constructed_cnxcn.ipynb`](notebooks/constructed_networks/rnn_constructed_cnxcn.ipynb) | Exact and Fourier-truncated translation RNNs on \(C_n\times C_n\) |
 | [`rnn_constructed_discrete_SE2_m3.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb) | Exact and Fourier-truncated QuadraticRNNs on \(\mathbb Z_n^2\rtimes C_3\) |
 | [`rnn_constructed_discrete_SE3.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_SE3.ipynb) | Exact and cost-aware truncated QuadraticRNNs on \(\mathbb Z_n^3\rtimes O\) |
+| [`rnn_constructed_discrete_SE3_A4.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_SE3_A4.ipynb) | Exact and cost-aware truncated QuadraticRNNs with tetrahedral rotations |
 
 The constructed notebooks distinguish between:
 
@@ -156,7 +162,7 @@ finite group.
 
 ```bash
 conda activate group-agf
-python -m src.main --config src/configs/config_d5.yaml
+python -m trained_networks.main --config trained_networks/configs/config_d5.yaml
 ```
 
 Outputs include loss histories, checkpoints, parameter snapshots, and representation-power analyses.
@@ -164,15 +170,15 @@ Outputs include loss histories, checkpoints, parameter snapshots, and representa
 ### Run a parameter sweep
 
 ```bash
-python -m src.run_sweep \
-  --sweep src/sweep_configs/example_sweep.yaml
+python -m trained_networks.run_sweep \
+  --sweep trained_networks/sweep_configs/example_sweep.yaml
 ```
 
 For multiple GPUs:
 
 ```bash
-python -m src.run_sweep \
-  --sweep src/sweep_configs/example_sweep.yaml \
+python -m trained_networks.run_sweep \
+  --sweep trained_networks/sweep_configs/example_sweep.yaml \
   --gpus auto
 ```
 
@@ -183,11 +189,7 @@ The group-agnostic construction lives in `src/finite_group_rnn.py`:
 ```python
 import numpy as np
 
-from src.finite_group_rnn import (
-    build_finite_group_rnn,
-    random_invertible_encoding,
-    rollout,
-)
+from src.finite_group_rnn import build_finite_group_rnn, random_invertible_encoding
 from src.groups import DiscreteSE2Group
 
 group = DiscreteSE2Group(n=2, m=3)
@@ -196,7 +198,7 @@ irreps = group.irreps()
 x_allo = np.random.default_rng(0).normal(size=group.order)
 x_ego = random_invertible_encoding(group, irreps, seed=1)
 
-params = build_finite_group_rnn(
+model = build_finite_group_rnn(
     group,
     x_ego,
     irrep_selection="all",
@@ -207,9 +209,13 @@ sequence = [
     group.encode(1, 0, 0),
     group.encode(0, 0, 1),
 ]
-result = rollout(params, x_allo, sequence)
+result = model.rollout(x_allo, sequence)
 ```
 
+The result is a fixed-weight PyTorch `nn.Module`: its analytical weights are
+registered as buffers, so evaluation involves no fitting or optimization.
+The default `action_side="right"` performs body-frame updates. Pass
+`action_side="left"` only when a spatial/world-frame convention is intended.
 With `materialize_mix=False`, recurrent mixing is applied as
 
 $$
@@ -223,25 +229,25 @@ avoiding the storage cost of a dense hidden-by-hidden matrix.
 ```text
 grids-and-groups/
 ├── notebooks/
-│   ├── trained_networks/          # Networks learned by gradient descent
 │   ├── constructed_networks/      # Closed-form representation-theoretic RNNs
 │   └── README.md                  # Notebook guide and experimental results
 ├── src/
 │   ├── groups/                    # Finite groups and irreducible representations
+│   ├── geometry/                  # Spatial encodings, decoding, metrics, and plots
+│   ├── finite_group_rnn.py        # Fixed-weight PyTorch RNN construction
+│   ├── neural_manifold.py         # Constructed-network orbit analysis
+│   └── template.py                # Population-code construction
+├── trained_networks/              # Optional learned-network stack
+│   ├── notebooks/                 # Gradient-training experiments
 │   ├── configs/                   # Training configurations
 │   ├── sweep_configs/             # Parameter-sweep configurations
-│   ├── finite_group_rnn.py        # Closed-form QuadraticRNN construction
-│   ├── discrete_se2_geometry.py   # Triangular geometry and SE(2) decoding
-│   ├── discrete_se3_geometry.py   # Cubic geometry and SE(3) pose decoding
-│   ├── model.py                   # TwoLayerMLP and QuadraticRNN
+│   ├── model.py                   # Trainable MLP and QuadraticRNN
 │   ├── dataset.py                 # Group-composition datasets
-│   ├── template.py                # Population-code construction
-│   ├── train.py                   # Training loops
+│   ├── train.py                   # Optimization loops
 │   ├── optimizer.py               # Custom optimizers
-│   ├── viz.py                     # Fourier and learned-network visualizations
 │   ├── main.py                    # Configured experiment entry point
-│   └── run_sweep.py               # Sweep entry point
-├── test/                          # Unit, integration, and notebook tests
+│   └── tests/                     # Training-specific tests and fixtures
+├── test/                          # Construction and group-theory tests
 ├── conda.yaml                     # Conda environment
 ├── pyproject.toml                 # Package and tool configuration
 └── poetry.lock                    # Locked Python dependencies
@@ -250,11 +256,9 @@ grids-and-groups/
 ### Key modules
 
 - **`src/groups/`** — group laws, regular actions, character orbits, induced irreps, and Fourier analysis.
-- **`src/finite_group_rnn.py`** — analytical weights, Fourier selection, factored recurrence, rollout, and hidden-state probes.
-- **`src/discrete_se2_geometry.py`** — triangular periodic distance, spatial bumps, direction alignment, and center decoding.
-- **`src/discrete_se3_geometry.py`** — cubic periodic geometry, anisotropic landmarks, position/orientation decoding, and trajectory plots.
-- **`src/model.py`** — trainable feedforward and recurrent architectures.
-- **`src/dataset.py`** — sampled and exhaustive sequential-composition datasets.
+- **`src/finite_group_rnn.py`** — fixed-weight PyTorch module with analytical buffers, Fourier selection, factored recurrence, rollout, and hidden-state probes.
+- **`src/geometry/`** — domain-specific square, triangular, and cubic signal encodings, decoders, geometric metrics, motion probes, and plots.
+- **`trained_networks/`** — isolated trainable models, datasets, optimizers, experiment runners, learned-network analysis, notebooks, and tests.
 
 ## Testing
 

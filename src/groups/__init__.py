@@ -7,6 +7,7 @@ from src.groups.dn import DihedralGroup
 from src.groups.group import Group
 from src.groups.irrep import IrreducibleRepresentation, LazyIrreducibleRepresentation
 from src.groups.oh import OctahedralGroup
+from src.groups.opposite import OppositeGroup, as_action_group, opposite_irrep
 from src.groups.znxzn_cm import DiscreteSE2Group
 from src.groups.znxznxzn_a4 import DiscreteSE3A4Group
 from src.groups.znxznxzn_oh import DiscreteSE3Group
@@ -20,6 +21,9 @@ __all__ = [
     "DihedralGroup",
     "OctahedralGroup",
     "IcosahedralGroup",
+    "OppositeGroup",
+    "as_action_group",
+    "opposite_irrep",
     "DiscreteSE2Group",
     "DiscreteSE3A4Group",
     "DiscreteSE3Group",

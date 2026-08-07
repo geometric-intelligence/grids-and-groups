@@ -332,10 +332,10 @@ class DiscreteSE3A4Group(Group):
         return np.take(signal, self.action_permutation(g), axis=-1)
 
     def cumulative_product(self, sequence) -> int:
-        """Return ``g_T ... g_1`` for drives ``(g_1, ..., g_T)``."""
+        """Return the body-frame product ``g_1 ... g_T``."""
         total = self.identity()
         for element in sequence:
-            total = self.compose(int(element), total)
+            total = self.compose(total, int(element))
         return total
 
     def _build_rotation_cayley(self) -> np.ndarray:
