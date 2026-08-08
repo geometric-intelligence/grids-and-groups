@@ -8,6 +8,7 @@ from .core import (
     lattice_path_coordinates,
     offset_coordinates,
     periodic_distance_squared,
+    periodic_spatial_autocorrelation,
     signal_to_tensor,
     tensor_to_signal,
     transformed_center,
@@ -28,9 +29,9 @@ from .encoding import gaussian_bump
 from .plotting import (
     linked_plotly_html,
     plot_group_signal,
-    plotly_heading_stacks,
     plot_lattice_scalar,
     plot_lattice_trajectory,
+    plotly_heading_stacks,
 )
 from .trajectories import TRACK_COLOR, make_momentum_motion_sequence
 
@@ -52,6 +53,7 @@ __all__ = [
     "offset_coordinates",
     "orientation_marginal",
     "periodic_distance_squared",
+    "periodic_spatial_autocorrelation",
     "plot_group_signal",
     "plotly_heading_stacks",
     "plot_lattice_scalar",
