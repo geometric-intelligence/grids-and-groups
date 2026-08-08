@@ -23,6 +23,25 @@ analytically from finite-group irreducible representations and load them into a
 fixed-weight PyTorch module. Its weights are buffers rather than trainable
 parameters, so no gradient training or optimization is used.
 
+### Editing constructed notebooks
+
+Each constructed notebook has a sibling percent-format Python file with
+`# %%` cell markers. Treat the `.py` file as the editable source: Cursor can
+run its cells directly, while ordinary code review sees a clean text diff
+without outputs, execution counts, widget state, or notebook metadata.
+
+The `.ipynb` files remain rendered snapshots. To regenerate one with
+[Jupytext](https://jupytext.readthedocs.io/), run:
+
+```bash
+jupytext --from py:percent --to ipynb \
+  --output notebooks/constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb \
+  notebooks/constructed_networks/rnn_constructed_discrete_SE2_m3.py
+```
+
+Execute the generated notebook separately when saved outputs are desired.
+Do not edit both formats independently.
+
 ## Overview
 
 | Notebook | Method | Purpose |

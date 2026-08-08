@@ -26,7 +26,9 @@ from .decoding import (
 )
 from .encoding import gaussian_bump
 from .plotting import (
+    linked_plotly_html,
     plot_group_signal,
+    plotly_heading_stacks,
     plot_lattice_scalar,
     plot_lattice_trajectory,
 )
@@ -45,11 +47,13 @@ __all__ = [
     "gaussian_bump",
     "lattice_coordinates",
     "lattice_path_coordinates",
+    "linked_plotly_html",
     "make_momentum_motion_sequence",
     "offset_coordinates",
     "orientation_marginal",
     "periodic_distance_squared",
     "plot_group_signal",
+    "plotly_heading_stacks",
     "plot_lattice_scalar",
     "plot_lattice_trajectory",
     "signal_to_tensor",
