@@ -20,9 +20,7 @@ def offset_coordinates(n: int) -> tuple[np.ndarray, np.ndarray]:
     return column + 0.5 * (y % 2), (np.sqrt(3) / 2) * y
 
 
-def lattice_coordinates(
-    n: int, *, mode: str = "offset"
-) -> tuple[np.ndarray, np.ndarray]:
+def lattice_coordinates(n: int, *, mode: str = "offset") -> tuple[np.ndarray, np.ndarray]:
     """Return lattice centers in a wrapped-offset or raw axial display."""
     if mode == "offset":
         return offset_coordinates(n)
@@ -70,9 +68,7 @@ def align_rotation_slices(group, tensor: np.ndarray) -> np.ndarray:
     expected = (group.m, group.n, group.n)
     if tensor.shape != expected:
         raise ValueError(f"tensor must have shape {expected}, got {tensor.shape}")
-    return np.asarray(
-        [align_rotation_slice(group, tensor[r], r) for r in range(group.m)]
-    )
+    return np.asarray([align_rotation_slice(group, tensor[r], r) for r in range(group.m)])
 
 
 def spatial_marginal(
@@ -123,9 +119,7 @@ def gaussian_bump(
     for x in range(group.n):
         for y in range(group.n):
             distance_squared = periodic_distance_squared(group.n, (x, y), center)
-            spatial[x, y] = baseline + amplitude * np.exp(
-                -0.5 * distance_squared / sigma**2
-            )
+            spatial[x, y] = baseline + amplitude * np.exp(-0.5 * distance_squared / sigma**2)
     return tensor_to_signal(group, np.repeat(spatial[None, :, :], group.m, axis=0))
 
 
@@ -229,9 +223,7 @@ def plot_group_signal(
             coordinate_mode=coordinate_mode,
         )
 
-    figure, axes = plt.subplots(
-        1, group.m, figsize=(4.5 * group.m, 4), constrained_layout=True
-    )
+    figure, axes = plt.subplots(1, group.m, figsize=(4.5 * group.m, 4), constrained_layout=True)
     axes = np.atleast_1d(axes)
     vmin, vmax = float(tensor.min()), float(tensor.max())
     for rotation, ax in enumerate(axes):
@@ -250,18 +242,14 @@ def plot_group_signal(
     return axes
 
 
-def lattice_path_coordinates(
-    points: np.ndarray, n: int, *, mode: str = "offset"
-) -> np.ndarray:
+def lattice_path_coordinates(points: np.ndarray, n: int, *, mode: str = "offset") -> np.ndarray:
     """Map integer lattice points to display coordinates."""
     points = np.asarray(points, dtype=int)
     if points.ndim != 2 or points.shape[1] != 2:
         raise ValueError(f"points must have shape (steps, 2), got {points.shape}")
     x, y = lattice_coordinates(n, mode=mode)
     wrapped = points % n
-    return np.column_stack(
-        (x[wrapped[:, 0], wrapped[:, 1]], y[wrapped[:, 0], wrapped[:, 1]])
-    )
+    return np.column_stack((x[wrapped[:, 0], wrapped[:, 1]], y[wrapped[:, 0], wrapped[:, 1]]))
 
 
 TRACK_COLOR = "#E45756"
@@ -287,15 +275,10 @@ def make_momentum_motion_sequence(
         start_xy = (n // 2, n // 2)
     x = int(np.clip(start_xy[0], margin, n - 1 - margin))
     y = int(np.clip(start_xy[1], margin, n - 1 - margin))
-    directions = np.asarray(
-        [(1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)]
-    )
+    directions = np.asarray([(1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)])
 
     def inside_bounds(x_new, y_new):
-        return (
-            margin <= x_new <= n - 1 - margin
-            and margin <= y_new <= n - 1 - margin
-        )
+        return margin <= x_new <= n - 1 - margin and margin <= y_new <= n - 1 - margin
 
     sequence = [group.encode(x, y, 0)]
     direction_index = int(rng.integers(0, len(directions)))
@@ -307,17 +290,13 @@ def make_momentum_motion_sequence(
             for _ in range(max_resample):
                 proposed = direction_index
                 if not momentum or rng.random() < turn_probability:
-                    proposed = (direction_index + rng.choice([-1, 1])) % len(
-                        directions
-                    )
+                    proposed = (direction_index + rng.choice([-1, 1])) % len(directions)
                 dx, dy = directions[proposed]
                 if inside_bounds(x + dx, y + dy):
                     direction_index = proposed
                     accepted = True
                     break
-                direction_index = (
-                    direction_index + rng.choice([-1, 1])
-                ) % len(directions)
+                direction_index = (direction_index + rng.choice([-1, 1])) % len(directions)
             if not accepted:
                 dx, dy = 0, 0
         x += int(dx)
@@ -334,17 +313,12 @@ def true_centers_from_cumulative_states(
 ) -> np.ndarray:
     """Decode exact bump centers from cumulative group elements."""
     return np.asarray(
-        [
-            transformed_center(group, int(state), original_center)
-            for state in cumulative_states
-        ],
+        [transformed_center(group, int(state), original_center) for state in cumulative_states],
         dtype=int,
     )
 
 
-def decode_centers_from_outputs(
-    group, outputs: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+def decode_centers_from_outputs(group, outputs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Decode spatial centers and direction marginals from output signals."""
     centers = []
     direction_marginals = []
@@ -406,12 +380,8 @@ def plot_lattice_trajectory(
     ax.set_xlim(float(x.min()) - radius, float(x.max()) + radius)
     ax.set_ylim(float(y.min()) - radius, float(y.max()) + radius)
 
-    exact_xy = lattice_path_coordinates(
-        exact_points, group.n, mode=coordinate_mode
-    )
-    predicted_xy = lattice_path_coordinates(
-        predicted_points, group.n, mode=coordinate_mode
-    )
+    exact_xy = lattice_path_coordinates(exact_points, group.n, mode=coordinate_mode)
+    predicted_xy = lattice_path_coordinates(predicted_points, group.n, mode=coordinate_mode)
     ax.scatter(
         exact_xy[:, 0],
         exact_xy[:, 1],

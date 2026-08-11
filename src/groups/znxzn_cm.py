@@ -120,8 +120,7 @@ class DiscreteSE2Group(Group):
         """Return indices of real irreps and complex-conjugate irrep pairs."""
         if self._conjugate_pairs is None:
             characters = [
-                np.asarray([np.trace(irrep(g)) for g in self.elements()])
-                for irrep in self._irreps
+                np.asarray([np.trace(irrep(g)) for g in self.elements()]) for irrep in self._irreps
             ]
             processed: set[int] = set()
             pairs = []
@@ -249,9 +248,7 @@ class DiscreteSE2Group(Group):
         """Apply the left action to signals whose final axis indexes the group."""
         signal = np.asarray(signal)
         if signal.shape[-1] != self.order:
-            raise ValueError(
-                f"signal final axis must have length {self.order}, got {signal.shape}"
-            )
+            raise ValueError(f"signal final axis must have length {self.order}, got {signal.shape}")
         return np.take(signal, self.action_permutation(g), axis=-1)
 
     def cumulative_product(self, sequence) -> int:

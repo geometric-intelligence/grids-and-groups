@@ -268,13 +268,9 @@ def plot_pose_trajectory(
     predicted_positions = np.asarray(predicted_positions)
     expected_shape = (exact_positions.shape[0], 3)
     if exact_positions.shape != expected_shape:
-        raise ValueError(
-            f"exact_positions must have shape (steps, 3), got {exact_positions.shape}"
-        )
+        raise ValueError(f"exact_positions must have shape (steps, 3), got {exact_positions.shape}")
     if predicted_positions.shape != exact_positions.shape:
-        raise ValueError(
-            "predicted_positions must have the same shape as exact_positions"
-        )
+        raise ValueError("predicted_positions must have the same shape as exact_positions")
 
     figure = plt.figure(figsize=(7.2, 6.2), constrained_layout=True)
     ax = figure.add_subplot(111, projection="3d")
