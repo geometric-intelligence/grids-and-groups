@@ -573,3 +573,26 @@ def build_finite_group_rnn(
         amplitude_mode=amplitude_mode,
         amplitude_multipliers=tuple(float(value) for value in amplitude_multipliers),
     )
+
+
+def rollout(model: FiniteGroupRNN, x_allo, sequence) -> dict[str, np.ndarray]:
+    """Compatibility wrapper returning NumPy rollout arrays."""
+    return {
+        key: value.detach().cpu().numpy()
+        for key, value in model.rollout(x_allo, sequence).items()
+    }
+
+
+def probe_hidden_states(
+    model: FiniteGroupRNN,
+    x_allo,
+    *,
+    drive_element: int | None = None,
+) -> np.ndarray:
+    """Compatibility wrapper returning a NumPy static-response array."""
+    return (
+        model.probe_hidden_states(x_allo, drive_element=drive_element)
+        .detach()
+        .cpu()
+        .numpy()
+    )
