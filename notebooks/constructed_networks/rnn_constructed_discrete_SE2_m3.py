@@ -9,6 +9,7 @@
 # A vector $x\in\mathbb{R}^{|G|}$ is a scalar function on $G=\mathbb{Z}_n^2\rtimes C_3$. This notebook constructs a parameterized quadratic RNN with an explicit choice of left- or right-regular updates, visualizes its encodings and analytical operators, follows one long pose rollout, and analyzes tuning and nonabelian irrep modules.
 
 # %%
+import os
 import sys
 from pathlib import Path
 
@@ -100,6 +101,17 @@ arrow_stride = 2  # Draw one orientation arrow every this many rollout steps.
 snapshot_steps = [0, num_long_steps // 2, num_long_steps - 1]
 num_tuning_irreps_to_plot = 5  # Highest-power nontrivial irrep modules to show.
 num_tuning_neurons_per_irrep = 10  # Optional neuron cap per tuning figure.
+notebook_test_mode = os.environ.get("NOTEBOOK_TEST_MODE") == "1"
+tuning_num_trajectories = 20 if notebook_test_mode else 500
+tuning_steps_per_trajectory = 35 if notebook_test_mode else 160
+tuning_burn_in_steps = 5 if notebook_test_mode else 10
+tuning_seed = 101  # Seed controlling trajectory seeds and starting positions.
+tuning_min_occupancy = 1 if notebook_test_mode else 5
+tuning_include_rotations = True  # Allow heading changes during tuning trajectories.
+tuning_momentum = True  # Correlate successive translation directions.
+tuning_turn_probability = 0.35  # Probability of changing translation direction.
+tuning_stay_probability = 0.04  # Probability of no translation on a step.
+tuning_margin = 0  # Allow tuning trajectories to visit the full periodic lattice.
 
 # Module-manifold analysis
 num_manifold_modules_to_plot = 6  # Highest-power retained modules to analyze.
@@ -959,13 +971,13 @@ figure.suptitle("Long-rollout reconstruction snapshots")
 plt.show()
 
 # %% [markdown]
-# ## 7. Representation-stratified hidden-state tuning
+# ## 7. Hidden-unit responses and tuning curves
 #
-# These tuning curves are computed by translating the allocentric input through every group element while holding the egocentric drive fixed at the identity. Following the $C_n\times C_n$ notebook, we keep one canonical representative from each retained conjugate pair and order those nontrivial irreps deterministically by their Fourier-power contribution to `x_allo`, from largest to smallest. Each figure contains many neurons from one irrep; the variables below can cap either the irreps or neurons displayed.
+# ### Static initialization responses
 #
-# For every neuron, the first three panels show the complete orientation-conditioned spatial tuning $f(x,y,\theta)$ at the three discrete headings. Each slice is aligned to the common allocentric lattice frame, and all conditioned maps in an irrep share one raw-activation color scale. The fourth panel is the spatial marginal $\sum_\theta f(x,y,\theta)$, with a separate shared scale because summation changes its range. The final three-bar panel is the direction marginal $\sum_{x,y} f(x,y,\theta)$. The conditioned maps preserve conjunctive position-direction structure that either marginal alone would discard.
+# The first analysis evaluates the network's initial hidden response after transforming `x_allo` by every group element and applying the identity drive. It is an exhaustive static response map, not a trajectory-derived tuning curve: there is no recurrent history and no averaging over visits. Units are grouped by irrep only to organize the plots. We show one member of each retained conjugate pair and order them by their Fourier power in `x_allo`.
 #
-# A second figure for each irrep shows periodic spatial autocorrelograms for every orientation-conditioned map and for the orientation-summed map. Before correlation, each map's spatial mean is removed; the result is normalized to one at zero displacement, which is displayed at the center of the tilted axial grid.
+# For each unit, the first three panels show the response at each heading, aligned to a common allocentric frame. The next panels sum over heading or position. A second figure shows periodic spatial autocorrelations after subtracting each map's mean.
 
 # %%
 # Sweep translated allocentric inputs while holding the egocentric drive fixed.
@@ -1113,7 +1125,7 @@ for power_rank, irrep_index in enumerate(tuning_irreps, start=1):
     figure.suptitle(
         f"Power rank {power_rank}: irrep {irrep_index}; "
         f"x_allo power={irrep_power_fraction:.2%}; {len(units)} neurons\n"
-        "Conjunctive position-direction tuning",
+        "Static position-heading response",
         fontsize=14,
     )
     plt.show()
@@ -1174,6 +1186,367 @@ for power_rank, irrep_index in enumerate(tuning_irreps, start=1):
     )
     plt.show()
 
+# %% [markdown]
+# ### Occupancy-normalized tuning from recurrent trajectories
+#
+# For neuron $i$ and a behavioral variable $X$, define its tuning curve by
+#
+# $$T_i(x)=\mathbb{E}[H_i\mid X=x].$$
+#
+# We estimate this conditional mean from recurrent hidden states collected during `tuning_num_trajectories` independent trajectories:
+#
+# $$\widehat T_i(x)=
+# \frac{\sum_{k,t}\mathbf{1}[X_{k,t}=x]H_{i,k,t}}
+# {\sum_{k,t}\mathbf{1}[X_{k,t}=x]}.$$
+#
+# Each trajectory has `tuning_steps_per_trajectory` steps and a random starting position. We discard its first `tuning_burn_in_steps` states so the special initialization step does not enter the estimate. Bins with fewer than `tuning_min_occupancy` retained visits are masked. The motion statistics are set by `tuning_include_rotations`, `tuning_momentum`, `tuning_turn_probability`, `tuning_stay_probability`, and `tuning_margin`. When rotations are enabled, the trajectory generator samples heading increments $(0,+1,-1)$ with probabilities $(3/5,1/5,1/5)$. Position and heading are already discrete, so the bins are exact states with no bin-width choice. We pool trajectories without temporal or spatial smoothing. Below each tuning figure, spatial autocorrelations are computed using only displacement pairs for which both bins pass the occupancy threshold.
+
+# %%
+if tuning_num_trajectories < 1:
+    raise ValueError("tuning_num_trajectories must be positive")
+if not 0 <= tuning_burn_in_steps < tuning_steps_per_trajectory:
+    raise ValueError(
+        "tuning_burn_in_steps must be nonnegative and smaller than "
+        "tuning_steps_per_trajectory"
+    )
+if tuning_min_occupancy < 1:
+    raise ValueError("tuning_min_occupancy must be positive")
+if not 0 <= tuning_margin < G.n / 2:
+    raise ValueError("tuning_margin must be nonnegative and smaller than G.n / 2")
+
+tuning_rng = np.random.default_rng(tuning_seed)
+tuning_trajectory_seeds = tuning_rng.integers(
+    0,
+    np.iinfo(np.int32).max,
+    size=tuning_num_trajectories,
+)
+tuning_start_positions = tuning_rng.integers(
+    tuning_margin,
+    G.n - tuning_margin,
+    size=(tuning_num_trajectories, 2),
+)
+
+pose_activity_sums = np.zeros((G.m, G.n, G.n, params.hidden_dim), dtype=float)
+pose_occupancy = np.zeros((G.m, G.n, G.n), dtype=int)
+
+for trajectory_seed, trajectory_start in zip(
+    tuning_trajectory_seeds, tuning_start_positions
+):
+    trajectory_sequence = make_momentum_motion_sequence(
+        G,
+        steps=tuning_steps_per_trajectory,
+        seed=int(trajectory_seed),
+        include_rotations=tuning_include_rotations,
+        momentum=tuning_momentum,
+        turn_probability=tuning_turn_probability,
+        stay_probability=tuning_stay_probability,
+        start_xy=tuple(int(value) for value in trajectory_start),
+        initial_pose=initial_pose,
+        margin=tuning_margin,
+    )
+    trajectory_result = {
+        key: value.detach().cpu().numpy()
+        for key, value in params.rollout(x_allo, trajectory_sequence).items()
+    }
+    if action_side == "right":
+        trajectory_poses = np.asarray(
+            [
+                advanced_pose(G, initial_pose, int(state))
+                for state in trajectory_result["cumulative_states"]
+            ]
+        )
+    else:
+        trajectory_poses = np.asarray(
+            [
+                transformed_pose(G, int(state), initial_pose)
+                for state in trajectory_result["cumulative_states"]
+            ]
+        )
+
+    retained_poses = trajectory_poses[tuning_burn_in_steps:]
+    retained_hidden = trajectory_result["hidden_states"][tuning_burn_in_steps:]
+    x_indices, y_indices, heading_indices = retained_poses.T
+    np.add.at(
+        pose_activity_sums,
+        (heading_indices, x_indices, y_indices),
+        retained_hidden,
+    )
+    np.add.at(
+        pose_occupancy,
+        (heading_indices, x_indices, y_indices),
+        1,
+    )
+
+
+def occupancy_normalized_activity(activity_sums, occupancy):
+    """Return conditional mean activity, masking poorly sampled bins."""
+    return np.divide(
+        activity_sums,
+        occupancy[..., None],
+        out=np.full_like(activity_sums, np.nan),
+        where=occupancy[..., None] >= tuning_min_occupancy,
+    )
+
+
+def masked_periodic_spatial_autocorrelation(values):
+    """Compute periodic autocorrelation using pairs of observed bins."""
+    values = np.asarray(values, dtype=float)
+    valid = np.isfinite(values)
+    if not np.any(valid):
+        return np.full_like(values, np.nan)
+
+    centered = np.where(valid, values - values[valid].mean(), 0.0)
+    zero_lag_energy = float(np.mean(centered[valid] ** 2))
+    if np.isclose(zero_lag_energy, 0.0):
+        return np.zeros_like(values)
+
+    autocorrelation = np.full_like(values, np.nan)
+    for shift_x in range(values.shape[0]):
+        for shift_y in range(values.shape[1]):
+            shifted_centered = np.roll(centered, (shift_x, shift_y), axis=(0, 1))
+            shifted_valid = np.roll(valid, (shift_x, shift_y), axis=(0, 1))
+            paired = valid & shifted_valid
+            if np.any(paired):
+                autocorrelation[shift_x, shift_y] = (
+                    np.mean(centered[paired] * shifted_centered[paired])
+                    / zero_lag_energy
+                )
+    return np.clip(np.fft.fftshift(autocorrelation), -1.0, 1.0)
+
+
+pose_tuning = occupancy_normalized_activity(
+    pose_activity_sums,
+    pose_occupancy,
+)
+position_activity_sums = pose_activity_sums.sum(axis=0)
+position_occupancy = pose_occupancy.sum(axis=0)
+position_tuning = occupancy_normalized_activity(
+    position_activity_sums,
+    position_occupancy,
+)
+heading_activity_sums = pose_activity_sums.sum(axis=(1, 2))
+heading_occupancy = pose_occupancy.sum(axis=(1, 2))
+heading_tuning = occupancy_normalized_activity(
+    heading_activity_sums,
+    heading_occupancy,
+)
+
+print(
+    f"trajectory tuning: {tuning_num_trajectories} trajectories x "
+    f"{tuning_steps_per_trajectory - tuning_burn_in_steps} retained steps = "
+    f"{pose_occupancy.sum()} samples"
+)
+print(
+    "pose-bin occupancy: "
+    f"min={pose_occupancy.min()}, median={np.median(pose_occupancy):.0f}, "
+    f"max={pose_occupancy.max()}; masking bins below {tuning_min_occupancy}"
+)
+
+# %%
+figure, axes = plt.subplots(
+    1,
+    G.m + 2,
+    figsize=(2.8 * (G.m + 2), 2.8),
+    constrained_layout=True,
+)
+occupancy_vmax = float(pose_occupancy.max())
+for rotation in range(G.m):
+    plot_lattice_scalar(
+        pose_occupancy[rotation],
+        ax=axes[rotation],
+        title=rf"visits at $\theta={heading_degrees[rotation]:.0f}^\circ$",
+        vmin=0,
+        vmax=occupancy_vmax,
+        colorbar=False,
+        coordinate_mode="axial",
+    )
+plot_lattice_scalar(
+    position_occupancy,
+    ax=axes[G.m],
+    title="visits by position",
+    vmin=0,
+    vmax=float(position_occupancy.max()),
+    colorbar=True,
+    coordinate_mode="axial",
+)
+axes[G.m + 1].bar(
+    np.arange(G.m),
+    heading_occupancy,
+    color=heading_colors,
+    width=0.72,
+)
+axes[G.m + 1].set(
+    xticks=np.arange(G.m),
+    xticklabels=[rf"${angle:.0f}^\circ$" for angle in heading_degrees],
+    ylabel="visits",
+    title="visits by heading",
+)
+axes[G.m + 1].spines[["top", "right"]].set_visible(False)
+figure.suptitle("Occupancy of recurrent-trajectory tuning samples")
+plt.show()
+
+# %%
+for power_rank, irrep_index in enumerate(tuning_irreps, start=1):
+    units = np.asarray(units_by_irrep[irrep_index], dtype=int)
+    if num_tuning_neurons_per_irrep is not None:
+        units = units[:num_tuning_neurons_per_irrep]
+
+    plotted_values = np.concatenate(
+        [
+            pose_tuning[..., units].ravel(),
+            position_tuning[..., units].ravel(),
+        ]
+    )
+    plotted_values = plotted_values[np.isfinite(plotted_values)]
+    response_vmin = float(plotted_values.min())
+    response_vmax = float(plotted_values.max())
+    heading_max = float(np.nanmax(heading_tuning[:, units]))
+
+    figure, axes = plt.subplots(
+        len(units),
+        G.m + 2,
+        figsize=(2.65 * (G.m + 2), 2.45 * len(units)),
+        constrained_layout=True,
+        squeeze=False,
+    )
+    for row, unit in enumerate(units):
+        metadata = params.metadata[int(unit)]
+        for rotation in range(G.m):
+            title = rf"$\mathbb{{E}}[H_i\mid x,y,\theta={heading_degrees[rotation]:.0f}^\circ]$"
+            if rotation == 0:
+                title = f"unit {int(unit)}, $\\delta={metadata['delta']}$\n" + title
+            plot_lattice_scalar(
+                pose_tuning[rotation, :, :, unit],
+                ax=axes[row, rotation],
+                title=title,
+                vmin=response_vmin,
+                vmax=response_vmax,
+                colorbar=False,
+                coordinate_mode="axial",
+            )
+        plot_lattice_scalar(
+            position_tuning[:, :, unit],
+            ax=axes[row, G.m],
+            title=rf"$\mathbb{{E}}[H_{{{int(unit)}}}\mid x,y]$",
+            vmin=response_vmin,
+            vmax=response_vmax,
+            colorbar=False,
+            coordinate_mode="axial",
+        )
+        heading_ax = axes[row, G.m + 1]
+        heading_ax.bar(
+            np.arange(G.m),
+            heading_tuning[:, unit],
+            color=heading_colors,
+            width=0.72,
+        )
+        heading_ax.set(
+            xticks=np.arange(G.m),
+            xticklabels=[rf"${angle:.0f}^\circ$" for angle in heading_degrees],
+            ylim=(0, 1.05 * heading_max if heading_max > 0 else 1),
+            title=rf"$\mathbb{{E}}[H_{{{int(unit)}}}\mid\theta]$",
+            ylabel="mean activity",
+        )
+        heading_ax.spines[["top", "right"]].set_visible(False)
+
+    response_colorbar = plt.cm.ScalarMappable(
+        norm=plt.Normalize(response_vmin, response_vmax),
+        cmap="viridis",
+    )
+    response_colorbar.set_array([])
+    figure.colorbar(
+        response_colorbar,
+        ax=axes[:, : G.m + 1].ravel(),
+        fraction=0.012,
+        pad=0.01,
+        label="occupancy-normalized mean activity",
+    )
+    irrep_power_fraction = power[irrep_index] / power.sum()
+    figure.suptitle(
+        f"Power rank {power_rank}: irrep {irrep_index}; "
+        f"x_allo power={irrep_power_fraction:.2%}; {len(units)} neurons\n"
+        "Trajectory tuning curves",
+        fontsize=14,
+    )
+    plt.show()
+
+    pose_tuning_autocorrelations = np.asarray(
+        [
+            [
+                masked_periodic_spatial_autocorrelation(
+                    pose_tuning[rotation, :, :, unit]
+                )
+                for rotation in range(G.m)
+            ]
+            for unit in units
+        ]
+    )
+    position_tuning_autocorrelations = np.asarray(
+        [
+            masked_periodic_spatial_autocorrelation(
+                position_tuning[:, :, unit]
+            )
+            for unit in units
+        ]
+    )
+
+    autocorrelation_figure, autocorrelation_axes = plt.subplots(
+        len(units),
+        G.m + 1,
+        figsize=(2.65 * (G.m + 1), 2.45 * len(units)),
+        constrained_layout=True,
+        squeeze=False,
+    )
+    for row, unit in enumerate(units):
+        metadata = params.metadata[int(unit)]
+        for rotation in range(G.m):
+            title = (
+                rf"autocorr of $\mathbb{{E}}[H_i\mid x,y,"
+                rf"\theta={heading_degrees[rotation]:.0f}^\circ]$"
+            )
+            if rotation == 0:
+                title = f"unit {int(unit)}, $\\delta={metadata['delta']}$\n" + title
+            plot_lattice_scalar(
+                pose_tuning_autocorrelations[row, rotation],
+                ax=autocorrelation_axes[row, rotation],
+                title=title,
+                cmap="viridis",
+                vmin=-1.0,
+                vmax=1.0,
+                colorbar=False,
+                coordinate_mode="centered_axial",
+            )
+        plot_lattice_scalar(
+            position_tuning_autocorrelations[row],
+            ax=autocorrelation_axes[row, G.m],
+            title=rf"autocorr of $\mathbb{{E}}[H_{{{int(unit)}}}\mid x,y]$",
+            cmap="viridis",
+            vmin=-1.0,
+            vmax=1.0,
+            colorbar=False,
+            coordinate_mode="centered_axial",
+        )
+
+    autocorrelation_colorbar = plt.cm.ScalarMappable(
+        norm=plt.Normalize(-1.0, 1.0),
+        cmap="viridis",
+    )
+    autocorrelation_colorbar.set_array([])
+    autocorrelation_figure.colorbar(
+        autocorrelation_colorbar,
+        ax=autocorrelation_axes.ravel(),
+        fraction=0.012,
+        pad=0.01,
+        label="normalized periodic spatial autocorrelation",
+    )
+    autocorrelation_figure.suptitle(
+        f"Power rank {power_rank}: irrep {irrep_index}; "
+        f"x_allo power={irrep_power_fraction:.2%}; {len(units)} neurons\n"
+        "Trajectory-tuning spatial autocorrelations (viridis)",
+        fontsize=14,
+    )
+    plt.show()
+
 # %%
 power = G.power_spectrum(x_allo)
 retained_fraction = power[params.selected_irrep_indices].sum() / power.sum()
@@ -1182,7 +1555,7 @@ print(f"selected Fourier power fraction: {retained_fraction:.3%}")
 recurrent_unit = representatives[0]
 recurrent_response = long_result["hidden_states"][:, recurrent_unit]
 print(
-    f"unit {recurrent_unit} tuning-sweep range={np.ptp(tuning_hidden[:, recurrent_unit]):.3e}; "
+    f"unit {recurrent_unit} static-sweep range={np.ptp(tuning_hidden[:, recurrent_unit]):.3e}; "
     f"long-rollout recurrent range={np.ptp(recurrent_response):.3e}"
 )
 print("Fourier power and reconstruction diagnostics quantify the selected module budget.")
