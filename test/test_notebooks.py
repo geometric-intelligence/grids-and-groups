@@ -1,22 +1,12 @@
 """
-Tests for notebook execution in the group-agf repository.
+Tests for constructed-notebook execution in the group-agf repository.
 
-This module runs all Jupyter notebooks in the notebooks/ directory to verify
-they execute without errors. When NOTEBOOK_TEST_MODE=1 environment variable
-is set, notebooks run with reduced epochs (2 instead of full training) to
-enable faster testing.
-
-Some notebooks are skipped by default because they:
-- Have hardcoded paths to other users' filesystems
-- Require external data files not included in the repository
-- Have known issues that require separate debugging
-
-Expected runtime:
-    - With NOTEBOOK_TEST_MODE=1: ~1-2 minutes total (for non-skipped notebooks)
-    - Without TEST_MODE: Much longer (not recommended for automated testing)
+This module runs the notebooks in ``notebooks/constructed_networks`` to verify
+that they execute without errors. Training notebooks and their dependencies
+live under ``trained_networks/`` and are intentionally outside this core test.
 
 Usage:
-    NOTEBOOK_TEST_MODE=1 pytest test/test_notebooks.py -v
+    pytest test/test_notebooks.py -v
 """
 
 import os
@@ -35,7 +25,7 @@ def get_repo_root():
 
 def get_notebooks_dir():
     """Get the notebooks directory."""
-    return get_repo_root() / "notebooks"
+    return get_repo_root() / "notebooks" / "constructed_networks"
 
 
 # Notebooks to skip (with reasons)
@@ -119,9 +109,6 @@ def execute_notebook(notebook_path, env):
 def test_notebook_execution(notebook_path, notebook_test_env):
     """
     Test that a notebook executes without errors.
-
-    This test runs each notebook with NOTEBOOK_TEST_MODE=1 to ensure
-    reduced epochs are used for faster execution.
     """
     notebook_name = notebook_path.stem
 

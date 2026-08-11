@@ -9,6 +9,14 @@ def triangular_coordinates(n: int) -> tuple[np.ndarray, np.ndarray]:
     return x + 0.5 * y, (np.sqrt(3) / 2) * y
 
 
+def centered_triangular_coordinates(n: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return axial lattice centers using residues centered around zero."""
+    indices = np.arange(n)
+    centered = (indices + n // 2) % n - n // 2
+    x, y = np.meshgrid(centered, centered, indexing="ij")
+    return x + 0.5 * y, (np.sqrt(3) / 2) * y
+
+
 def offset_coordinates(n: int) -> tuple[np.ndarray, np.ndarray]:
     """Return a wrapped rectangular display of an ``n × n`` triangular lattice."""
     x, y = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
@@ -19,12 +27,14 @@ def offset_coordinates(n: int) -> tuple[np.ndarray, np.ndarray]:
 def lattice_coordinates(
     n: int, *, mode: str = "offset"
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return lattice centers in a wrapped-offset or raw axial display."""
+    """Return lattice centers in a wrapped, raw, or identity-centered display."""
     if mode == "offset":
         return offset_coordinates(n)
     if mode == "axial":
         return triangular_coordinates(n)
-    raise ValueError("mode must be 'offset' or 'axial'")
+    if mode == "centered_axial":
+        return centered_triangular_coordinates(n)
+    raise ValueError("mode must be 'offset', 'axial', or 'centered_axial'")
 
 
 def signal_to_tensor(group, signal: np.ndarray) -> np.ndarray:

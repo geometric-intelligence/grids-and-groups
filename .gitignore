@@ -2,6 +2,11 @@
 __pycache__/
 *.py[codz]
 *$py.class
+
+# Local OS metadata and generated videos
+.DS_Store
+*.mp4
+
 loss-without-lines.pdf
 training_history.pkl
 fourier_power_only.pdf

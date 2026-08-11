@@ -18,6 +18,24 @@ notebooks/
 
 The notebooks in `trained_networks/` learn group composition from data using PyTorch. The notebooks in `constructed_networks/` derive the weights analytically from finite-group irreducible representations; no gradient training is used.
 
+### Editing constructed notebooks
+
+Each constructed notebook has a sibling percent-format Python file with
+`# %%` cell markers. Treat the `.py` file as the editable source: Cursor can
+run its cells directly, while ordinary code review sees a clean text diff
+without outputs, execution counts, widget state, or notebook metadata.
+
+The `.ipynb` files remain generated snapshots. Regenerate one with Jupytext:
+
+```bash
+jupytext --from py:percent --to ipynb \
+  --output notebooks/constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb \
+  notebooks/constructed_networks/rnn_constructed_discrete_SE2_m3.py
+```
+
+Execute the generated notebook separately when saved outputs are desired.
+Do not edit both formats independently.
+
 ## Overview
 
 | Notebook | Method | Purpose |
