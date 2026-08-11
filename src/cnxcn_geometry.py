@@ -61,17 +61,13 @@ def gaussian_bump(
                     periodic_delta(group.p2, y, center[1]),
                 )
             )
-            grid[x, y] = baseline + amplitude * np.exp(
-                -0.5 * np.sum((delta / sigma) ** 2)
-            )
+            grid[x, y] = baseline + amplitude * np.exp(-0.5 * np.sum((delta / sigma) ** 2))
     return grid_to_signal(group, grid)
 
 
 def decode_spatial_argmax(group, signal: np.ndarray) -> tuple[int, int]:
     """Decode a signal by the maximum grid entry."""
-    return tuple(
-        int(value) for value in np.unravel_index(np.argmax(signal), (group.p1, group.p2))
-    )
+    return tuple(int(value) for value in np.unravel_index(np.argmax(signal), (group.p1, group.p2)))
 
 
 def transformed_center(
@@ -143,10 +139,7 @@ def make_momentum_motion_sequence(
     directions = np.asarray([(1, 0), (0, 1), (-1, 0), (0, -1)])
 
     def inside_bounds(x_new, y_new):
-        return (
-            margin <= x_new <= group.p1 - 1 - margin
-            and margin <= y_new <= group.p2 - 1 - margin
-        )
+        return margin <= x_new <= group.p1 - 1 - margin and margin <= y_new <= group.p2 - 1 - margin
 
     sequence = [group.encode(x, y)]
     direction_index = int(rng.integers(0, len(directions)))
@@ -158,17 +151,13 @@ def make_momentum_motion_sequence(
             for _ in range(max_resample):
                 proposed = direction_index
                 if rng.random() < turn_probability:
-                    proposed = (direction_index + rng.choice([-1, 1])) % len(
-                        directions
-                    )
+                    proposed = (direction_index + rng.choice([-1, 1])) % len(directions)
                 dx, dy = directions[proposed]
                 if inside_bounds(x + dx, y + dy):
                     direction_index = proposed
                     accepted = True
                     break
-                direction_index = (
-                    direction_index + rng.choice([-1, 1])
-                ) % len(directions)
+                direction_index = (direction_index + rng.choice([-1, 1])) % len(directions)
             if not accepted:
                 dx, dy = 0, 0
         x += int(dx)
@@ -177,9 +166,7 @@ def make_momentum_motion_sequence(
     return np.asarray(sequence, dtype=int)
 
 
-def center_errors(
-    group, predicted: np.ndarray, exact: np.ndarray
-) -> np.ndarray:
+def center_errors(group, predicted: np.ndarray, exact: np.ndarray) -> np.ndarray:
     """Return periodic Euclidean errors between decoded centers."""
     return np.asarray(
         [
