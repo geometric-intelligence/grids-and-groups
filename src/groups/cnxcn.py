@@ -84,9 +84,7 @@ class ProductCyclicGroup(Group):
         """Apply the regular left action without materializing permutation matrices."""
         signal = np.asarray(signal)
         if signal.shape != (self._order,):
-            raise ValueError(
-                f"signal must have shape ({self._order},), got {signal.shape}"
-            )
+            raise ValueError(f"signal must have shape ({self._order},), got {signal.shape}")
         return signal[self.action_permutation(element)]
 
     def cumulative_product(self, sequence) -> int:

@@ -262,9 +262,7 @@ class DiscreteSE3Group(Group):
         """Return the inverse of element ``g``."""
         x, y, z, r = self.decode(g)
         r_inverse = int(self._rot_inverse[r])
-        x_inverse, y_inverse, z_inverse = self._apply_rotation(
-            r_inverse, -x, -y, -z
-        )
+        x_inverse, y_inverse, z_inverse = self._apply_rotation(r_inverse, -x, -y, -z)
         return self.encode(x_inverse, y_inverse, z_inverse, r_inverse)
 
     def _apply_rotation(self, r: int, x: int, y: int, z: int) -> tuple[int, int, int]:
@@ -300,9 +298,7 @@ class DiscreteSE3Group(Group):
         """Apply the left action to signals whose final axis indexes the group."""
         signal = np.asarray(signal)
         if signal.shape[-1] != self.order:
-            raise ValueError(
-                f"signal final axis must have length {self.order}, got {signal.shape}"
-            )
+            raise ValueError(f"signal final axis must have length {self.order}, got {signal.shape}")
         return np.take(signal, self.action_permutation(g), axis=-1)
 
     def cumulative_product(self, sequence) -> int:
@@ -324,8 +320,7 @@ class DiscreteSE3Group(Group):
         inverses = np.empty(_ROTATION_ORDER, dtype=np.int64)
         for rotation in range(_ROTATION_ORDER):
             matches = np.where(
-                (self._rot_cayley[rotation] == 0)
-                & (self._rot_cayley[:, rotation] == 0)
+                (self._rot_cayley[rotation] == 0) & (self._rot_cayley[:, rotation] == 0)
             )[0]
             if len(matches) != 1:
                 raise ValueError(f"could not find inverse for rotation {rotation}")
