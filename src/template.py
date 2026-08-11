@@ -62,21 +62,6 @@ def custom_fourier(group, powers):
     return template
 
 
-def make_template(config):
-    """Create a template based on configuration.
-
-    For ``custom_fourier`` templates, uses :func:`custom_fourier` with the
-    ``Group`` object stored in ``config["group"]``.
-    """
-    if config["template_type"] == "custom_fourier":
-        template = custom_fourier(config["group"], config["powers"])
-    elif config["template_type"] == "one_hot":
-        template = one_hot(config["group_size"])
-    else:
-        raise ValueError(f"Unknown template type: {config['template_type']}")
-    return template
-
-
 def mnist_1d(group_size: int, label: int, root: str = "data", axis: int = 0):
     """Return a (group_size,) 1D template from a random MNIST image by taking a slice or projection.
 

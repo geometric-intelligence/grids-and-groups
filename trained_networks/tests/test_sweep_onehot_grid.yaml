@@ -1,0 +1,29 @@
+# Test sweep config mirroring trained_networks/sweep_configs/onehot_scaling_sweep.yaml
+# Tiny parameter grid for fast execution (< 1 min)
+# Total: 2 x 1 x 1 = 2 experiments
+
+base_config: "trained_networks/configs/config.yaml"
+n_seeds: 1
+
+global_overrides:
+  device: cpu
+  training:
+    epochs: 2
+    num_steps: 2
+    verbose_interval: 1
+    save_param_interval: null
+  data:
+    group_name: cn
+    k: 2
+    dimension: 1
+    template_type: 'onehot'
+    num_samples: 10
+    batch_size: 5
+    mode: sampled
+
+parameter_grid:
+  data:
+    p: [5, 7]
+    k: [2]
+  model:
+    hidden_dim: [8]
