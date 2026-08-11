@@ -59,18 +59,13 @@ def fixed_point_embedding(
     states = np.asarray(initial_states, dtype=float).copy()
     if states.ndim != 2 or states.shape[1] != params.hidden_dim:
         raise ValueError(
-            f"initial_states must have shape (samples, {params.hidden_dim}), "
-            f"got {states.shape}"
+            f"initial_states must have shape (samples, {params.hidden_dim}), got {states.shape}"
         )
     group = params.group
-    identity_drive = params.W_drive @ group.left_action(
-        group.identity(), params.x_ego
-    )
+    identity_drive = params.W_drive @ group.left_action(group.identity(), params.x_ego)
     residuals = np.full(len(states), np.inf)
     for iteration in range(1, max_iterations + 1):
-        updated = squared_relu(
-            params.apply_mix(states.T).T + identity_drive[None, :]
-        )
+        updated = squared_relu(params.apply_mix(states.T).T + identity_drive[None, :])
         difference = np.linalg.norm(updated - states, axis=1)
         scale = np.maximum(np.linalg.norm(states, axis=1), 1.0)
         residuals = difference / scale
@@ -87,14 +82,9 @@ def _selected_characters(params, *, max_samples: int = 256) -> np.ndarray:
     if group.order <= max_samples:
         elements = np.arange(group.order)
     else:
-        elements = np.unique(
-            np.linspace(0, group.order - 1, max_samples, dtype=int)
-        )
+        elements = np.unique(np.linspace(0, group.order - 1, max_samples, dtype=int))
     return np.asarray(
-        [
-            [np.trace(irrep(int(element))) for element in elements]
-            for irrep in params.irreps
-        ]
+        [[np.trace(irrep(int(element))) for element in elements] for irrep in params.irreps]
     )
 
 
@@ -108,11 +98,7 @@ def conjugate_irrep_groups(
     """Group selected global irrep indices with available conjugate partners."""
     selected = list(params.selected_irrep_indices)
     if not include_conjugates:
-        return [
-            (index,)
-            for index in selected
-            if not (skip_trivial and index == 0)
-        ]
+        return [(index,) for index in selected if not (skip_trivial and index == 0)]
 
     characters = _selected_characters(params)
     dimensions = np.asarray([irrep.dim for irrep in params.irreps])
@@ -121,12 +107,7 @@ def conjugate_irrep_groups(
         candidates = np.flatnonzero(dimensions == dimensions[local_index])
         errors = np.asarray(
             [
-                np.max(
-                    np.abs(
-                        characters[candidate]
-                        - np.conjugate(characters[local_index])
-                    )
-                )
+                np.max(np.abs(characters[candidate] - np.conjugate(characters[local_index])))
                 for candidate in candidates
             ]
         )
@@ -155,12 +136,9 @@ def build_module_orbits(
     fixed_states = np.asarray(fixed_states)
     if fixed_states.ndim != 2 or fixed_states.shape[1] != params.hidden_dim:
         raise ValueError(
-            f"fixed_states must have shape (samples, {params.hidden_dim}), "
-            f"got {fixed_states.shape}"
+            f"fixed_states must have shape (samples, {params.hidden_dim}), got {fixed_states.shape}"
         )
-    metadata_irreps = np.asarray(
-        [item["irrep_index"] for item in params.metadata]
-    )
+    metadata_irreps = np.asarray([item["irrep_index"] for item in params.metadata])
     orbits = []
     for irrep_group in conjugate_irrep_groups(
         params,
@@ -188,17 +166,9 @@ def combine_module_orbits(modules: list[ModuleOrbit]) -> ModuleOrbit:
         raise ValueError("all module orbits must contain the same samples")
     return ModuleOrbit(
         irrep_indices=tuple(
-            sorted(
-                {
-                    index
-                    for module in modules
-                    for index in module.irrep_indices
-                }
-            )
+            sorted({index for module in modules for index in module.irrep_indices})
         ),
-        unit_indices=np.concatenate(
-            [module.unit_indices for module in modules]
-        ),
+        unit_indices=np.concatenate([module.unit_indices for module in modules]),
         activity=np.concatenate(
             [module.activity for module in modules],
             axis=1,
@@ -213,21 +183,14 @@ def coordinate_colors(
     """Encode one-, two-, or three-dimensional group coordinates as RGB."""
     coordinates = np.asarray(coordinates, dtype=float)
     if coordinates.ndim != 2 or coordinates.shape[1] != len(periods):
-        raise ValueError(
-            "coordinates must have shape (samples, len(periods))"
-        )
+        raise ValueError("coordinates must have shape (samples, len(periods))")
     normalized = np.column_stack(
-        [
-            coordinates[:, axis] / max(period - 1, 1)
-            for axis, period in enumerate(periods)
-        ]
+        [coordinates[:, axis] / max(period - 1, 1) for axis, period in enumerate(periods)]
     )
     if normalized.shape[1] == 1:
         return plt.get_cmap("hsv")(normalized[:, 0])[:, :3]
     if normalized.shape[1] == 2:
-        return np.column_stack(
-            (normalized[:, 0], normalized[:, 1], np.full(len(normalized), 0.35))
-        )
+        return np.column_stack((normalized[:, 0], normalized[:, 1], np.full(len(normalized), 0.35)))
     return normalized[:, :3]
 
 
@@ -312,9 +275,7 @@ def analyze_module_orbit(
         np.round(coordinates, decimals=12),
         axis=0,
     )
-    topology_indices = farthest_point_subsample(
-        topology_coordinates, max_persistence_points
-    )
+    topology_indices = farthest_point_subsample(topology_coordinates, max_persistence_points)
     distance_matrix = pairwise_distances(
         topology_coordinates[topology_indices],
         metric="euclidean",
@@ -343,14 +304,8 @@ def analyze_module_orbits(
 
 
 def _plot_persistence_diagrams(ax, diagrams: list[np.ndarray]) -> None:
-    finite_arrays = [
-        diagram[np.isfinite(diagram[:, 1]), 1]
-        for diagram in diagrams
-        if len(diagram)
-    ]
-    finite_deaths = (
-        np.concatenate(finite_arrays) if finite_arrays else np.asarray([])
-    )
+    finite_arrays = [diagram[np.isfinite(diagram[:, 1]), 1] for diagram in diagrams if len(diagram)]
+    finite_deaths = np.concatenate(finite_arrays) if finite_arrays else np.asarray([])
     cap = float(finite_deaths.max()) if finite_deaths.size else 1.0
     cap = max(cap, 1e-8)
     colors = ("0.55", "#4C78A8", "#F58518", "#54A24B")
@@ -388,8 +343,7 @@ def plot_manifold_analysis(
     colors = np.asarray(colors)
     if colors.shape != (len(analysis.embedding), 3):
         raise ValueError(
-            f"colors must have shape ({len(analysis.embedding)}, 3), "
-            f"got {colors.shape}"
+            f"colors must have shape ({len(analysis.embedding)}, 3), got {colors.shape}"
         )
     figure, axes = plt.subplots(1, 2, figsize=(10.5, 4.2), constrained_layout=True)
     axes[0].scatter(
