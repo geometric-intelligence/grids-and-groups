@@ -12,7 +12,9 @@ notebooks/
 │   └── discrete_se2_local_composition.ipynb
 └── constructed_networks/
     ├── rnn_constructed_cnxcn.ipynb
-    ├── rnn_constructed_discrete_SE2_m3.ipynb
+    ├── rnn_constructed_discrete_se2_c6.ipynb
+    ├── rnn_constructed_discrete_se2_c6_tuning.ipynb
+    ├── rnn_constructed_discrete_se2_c6_manifolds.ipynb
     └── rnn_constructed_discrete_SE3.ipynb
 ```
 
@@ -29,12 +31,17 @@ The `.ipynb` files remain generated snapshots. Regenerate one with Jupytext:
 
 ```bash
 jupytext --from py:percent --to ipynb \
-  --output notebooks/constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb \
-  notebooks/constructed_networks/rnn_constructed_discrete_SE2_m3.py
+  --output notebooks/constructed_networks/rnn_constructed_discrete_se2_c6.ipynb \
+  notebooks/constructed_networks/rnn_constructed_discrete_se2_c6.py
 ```
 
 Execute the generated notebook separately when saved outputs are desired.
 Do not edit both formats independently.
+
+Each split C6 notebook begins with an **Execution contract**. The tuning
+notebook caches expensive occupancy statistics under the gitignored
+`artifacts/constructed_networks/discrete_se2_c6/` directory. Plot changes do
+not invalidate that artifact.
 
 ## Overview
 
@@ -46,7 +53,9 @@ Do not edit both formats independently.
 | [`trained_networks/discrete_se2_analysis.ipynb`](trained_networks/discrete_se2_analysis.ipynb) | Post-hoc analysis | Load and analyze saved discrete-SE(2) runs without retraining |
 | [`trained_networks/discrete_se2_local_composition.ipynb`](trained_networks/discrete_se2_local_composition.ipynb) | Trained QuadraticRNN | Test whether local generator compositions generalize globally |
 | [`constructed_networks/rnn_constructed_cnxcn.ipynb`](constructed_networks/rnn_constructed_cnxcn.ipynb) | Closed-form QuadraticRNN | Exact and Fourier-truncated translations on \(C_n\times C_n\) |
-| [`constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb`](constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb) | Closed-form QuadraticRNN | Exact and Fourier-truncated constructions on \(\mathbb Z_n^2\rtimes C_3\) |
+| [`constructed_networks/rnn_constructed_discrete_se2_c6.ipynb`](constructed_networks/rnn_constructed_discrete_se2_c6.ipynb) | Closed-form QuadraticRNN | C6 construction, regular actions, naturalistic rollout, and decoding |
+| [`constructed_networks/rnn_constructed_discrete_se2_c6_tuning.ipynb`](constructed_networks/rnn_constructed_discrete_se2_c6_tuning.ipynb) | Tuning analysis | Empirical trajectories, exhaustive all-pairs, and local-arrival tuning |
+| [`constructed_networks/rnn_constructed_discrete_se2_c6_manifolds.ipynb`](constructed_networks/rnn_constructed_discrete_se2_c6_manifolds.ipynb) | Neural-manifold analysis | Fixed points, irrep modules, UMAP, and persistent homology |
 | [`constructed_networks/rnn_constructed_discrete_SE3.ipynb`](constructed_networks/rnn_constructed_discrete_SE3.ipynb) | Closed-form QuadraticRNN | Exact and cost-aware truncated constructions on \(\mathbb Z_n^3\rtimes O\) |
 
 ## Trained networks
@@ -156,25 +165,19 @@ phase rather than the full translation torus. The notebook therefore plots
 representative single-pair modules and a positive control formed from two
 independent frequency pairs, which can expose \(\mathbb T^2\).
 
-### `rnn_constructed_discrete_SE2_m3.ipynb`
+### Constructed discrete-\(SE(2)\) \(C_6\) notebooks
 
-This notebook constructs a QuadraticRNN analytically for
+These three standalone notebooks construct and analyze a QuadraticRNN for
 
 $$
-\mathbb Z_n^2\rtimes C_3.
+\mathbb Z_n^2\rtimes C_6.
 $$
 
-It separates:
-
-1. a small all-irrep experiment that verifies exact translation, rotation, and mixed composition to floating-point precision; and
-2. the original \(n=50\) spatial experiment using ten high-power irreps.
-
-The truncated experiment includes aligned triangular-lattice encodings, all four
-analytical weight operators, short and long rollouts, separate signal and center
-errors, reconstruction snapshots, static hidden-unit tuning, and
-module-restricted UMAP and persistent-homology plots. The manifold probe fixes
-orientation and varies all \(50^2\) translations, so it specifically tests the
-translation orbit visible within each retained module.
+The construction notebook covers group conventions, deterministic network
+construction, and naturalistic rollout. The tuning notebook compares empirical
+trajectory tuning with exhaustive all-pairs and local-arrival definitions. The
+manifold notebook contains fixed-point, module-orbit, UMAP, and
+persistent-homology analyses.
 
 ### `rnn_constructed_discrete_SE3.ipynb`
 
@@ -220,7 +223,9 @@ finite group rather than a dense sample of \(SO(3)\).
 - For end-to-end discrete-SE(2) training, use `trained_networks/discrete_se2_rnn.ipynb`.
 - For analysis of saved runs, use `trained_networks/discrete_se2_analysis.ipynb`.
 - For local-to-global generalization, use `trained_networks/discrete_se2_local_composition.ipynb`.
-- For the analytical discrete-SE(2) construction, use `constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb`.
+- For analytical discrete-SE(2) construction and rollout, use `constructed_networks/rnn_constructed_discrete_se2_c6.ipynb`.
+- For tuning analyses, use `constructed_networks/rnn_constructed_discrete_se2_c6_tuning.ipynb`.
+- For module-restricted topology, use `constructed_networks/rnn_constructed_discrete_se2_c6_manifolds.ipynb`.
 - For the analytical discrete-SE(3) construction, use `constructed_networks/rnn_constructed_discrete_SE3.ipynb`.
 
 ## Environment

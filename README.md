@@ -136,7 +136,9 @@ Notebooks are divided into trained and analytically constructed networks. See [`
 | Notebook | Purpose |
 | --- | --- |
 | [`rnn_constructed_cnxcn.ipynb`](notebooks/constructed_networks/rnn_constructed_cnxcn.ipynb) | Exact and Fourier-truncated translation RNNs on \(C_n\times C_n\) |
-| [`rnn_constructed_discrete_SE2_m3.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_SE2_m3.ipynb) | Exact and Fourier-truncated QuadraticRNNs on \(\mathbb Z_n^2\rtimes C_3\) |
+| [`rnn_constructed_discrete_se2_c6.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_se2_c6.ipynb) | C6 construction, regular actions, and naturalistic rollout |
+| [`rnn_constructed_discrete_se2_c6_tuning.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_se2_c6_tuning.ipynb) | Empirical and theoretical tuning comparisons |
+| [`rnn_constructed_discrete_se2_c6_manifolds.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_se2_c6_manifolds.ipynb) | Fixed-point module manifolds and persistent homology |
 | [`rnn_constructed_discrete_SE3.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_SE3.ipynb) | Exact and cost-aware truncated QuadraticRNNs on \(\mathbb Z_n^3\rtimes O\) |
 
 The constructed notebooks distinguish between:
@@ -274,7 +276,7 @@ pytest test/test_finite_group_rnn.py -q
 Run notebook execution tests:
 
 ```bash
-NOTEBOOK_TEST_MODE=1 pytest test/test_notebooks.py -q
+pytest test/test_notebooks.py -q
 ```
 
 Run lint checks:
