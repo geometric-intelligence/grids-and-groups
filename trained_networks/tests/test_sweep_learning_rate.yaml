@@ -1,0 +1,35 @@
+# Test sweep config mirroring trained_networks/sweep_configs/learning_rate_sweep.yaml
+# Minimal parameters for fast execution (< 1 min)
+
+base_config: "trained_networks/configs/config.yaml"
+n_seeds: 1
+
+global_overrides:
+  device: cpu
+  training:
+    epochs: 2
+    num_steps: 2
+    verbose_interval: 1
+    save_param_interval: null
+  model:
+    hidden_dim: 4
+  data:
+    group_name: cn
+    p: 5
+    k: 2
+    num_samples: 10
+    batch_size: 5
+    mode: sampled
+
+experiments:
+  - name: "adam_lr_1e-2"
+    overrides:
+      training:
+        optimizer: "adam"
+        learning_rate: 0.01
+
+  - name: "hybrid_scale_-3"
+    overrides:
+      training:
+        optimizer: "hybrid"
+        scaling_factor: -3

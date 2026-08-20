@@ -1,0 +1,42 @@
+# Learning rate sweep configuration
+# Compares different learning rates and optimizers
+
+base_config: "trained_networks/configs/config.yaml"
+n_seeds: 5
+
+experiments:
+  - name: "adam_lr_1e-2"
+    overrides:
+      training:
+        optimizer: 'adam'
+        learning_rate: 0.01
+
+  - name: "adam_lr_1e-3"
+    overrides:
+      training:
+        optimizer: 'adam'
+        learning_rate: 0.001
+
+  - name: "adam_lr_1e-4"
+    overrides:
+      training:
+        optimizer: 'adam'
+        learning_rate: 0.0001
+
+  - name: "hybrid_scale_-2"
+    overrides:
+      training:
+        optimizer: 'hybrid'
+        scaling_factor: -2
+
+  - name: "hybrid_scale_-3"
+    overrides:
+      training:
+        optimizer: 'hybrid'
+        scaling_factor: -3
+
+  - name: "hybrid_scale_-4"
+    overrides:
+      training:
+        optimizer: 'hybrid'
+        scaling_factor: -4

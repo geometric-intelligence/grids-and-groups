@@ -12,6 +12,11 @@ notebooks/saved_models/
 notebooks/checkpoint*
 notebooks/W-weights.pdf
 notebooks/predictions.pdf
+trained_networks/notebooks/figs/
+trained_networks/notebooks/figs_temp/
+trained_networks/notebooks/figures/
+trained_networks/notebooks/saved_models/
+trained_networks/notebooks/checkpoint*
 
 runs/
 data/
