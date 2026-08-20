@@ -57,8 +57,7 @@ def fourier_power(signal: np.ndarray, irrep, *, normalize_by_dim: bool = True) -
 def minimum_fourier_singular_value(signal: np.ndarray, irreps) -> float:
     """Return the smallest singular value over the supplied Fourier blocks."""
     return min(
-        float(np.linalg.svd(fourier_hat(signal, irrep), compute_uv=False).min())
-        for irrep in irreps
+        float(np.linalg.svd(fourier_hat(signal, irrep), compute_uv=False).min()) for irrep in irreps
     )
 
 
@@ -516,12 +515,7 @@ def build_finite_group_rnn(
                 for k0 in range(dim):
                     for k1 in range(dim):
                         for k2 in range(dim):
-                            matrix_in = (
-                                eps1
-                                * amplitude_in
-                                * phase_in
-                                * _matrix_unit(dim, k0, k2)
-                            )
+                            matrix_in = eps1 * amplitude_in * phase_in * _matrix_unit(dim, k0, k2)
                             matrix_drive = (
                                 eps1
                                 * eps2
@@ -530,10 +524,7 @@ def build_finite_group_rnn(
                                 * (xhat_inv_dagger @ _matrix_unit(dim, k2, k1))
                             )
                             matrix_out = (
-                                eps2
-                                * amplitude_out
-                                * phase_out
-                                * _matrix_unit(dim, k0, k1)
+                                eps2 * amplitude_out * phase_out * _matrix_unit(dim, k0, k1)
                             )
                             rows_in.append(_trace_features(matrices, matrix_in))
                             rows_drive.append(_trace_features(matrices, matrix_drive))
