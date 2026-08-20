@@ -88,10 +88,10 @@ class ProductCyclicGroup(Group):
         return signal[self.action_permutation(element)]
 
     def cumulative_product(self, sequence) -> int:
-        """Compose a sequence in the order used by recurrent left actions."""
+        """Return the product of a sequence in input order."""
         cumulative = self.identity()
         for element in sequence:
-            cumulative = self.compose(int(element), cumulative)
+            cumulative = self.compose(cumulative, int(element))
         return cumulative
 
     def irreps(self) -> list[IrreducibleRepresentation]:

@@ -252,10 +252,10 @@ class DiscreteSE2Group(Group):
         return np.take(signal, self.action_permutation(g), axis=-1)
 
     def cumulative_product(self, sequence) -> int:
-        """Return ``g_T ... g_1`` for drives ``(g_1, ..., g_T)``."""
+        """Return the body-frame product ``g_1 ... g_T``."""
         total = self.identity()
         for g in sequence:
-            total = self.compose(int(g), total)
+            total = self.compose(total, int(g))
         return total
 
     # ------------------------------------------------------------------
