@@ -17,6 +17,7 @@ notebooks/saved_models/
 notebooks/checkpoint*
 notebooks/W-weights.pdf
 notebooks/predictions.pdf
+artifacts/constructed_networks/
 
 runs/
 data/
