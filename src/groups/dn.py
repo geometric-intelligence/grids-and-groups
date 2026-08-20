@@ -4,7 +4,7 @@ Elements are indexed 0..2N-1:
   - 0..N-1   : rotations r^0, r^1, ..., r^{N-1}
   - N..2N-1  : r^0*s, r^1*s, ..., r^{N-1}*s  (reflection composed with rotation)
 
-Irrep ordering matches escnn.group.DihedralGroup exactly.
+Irreps are ordered with the trivial and reflection-sign representations first.
 """
 
 import numpy as np

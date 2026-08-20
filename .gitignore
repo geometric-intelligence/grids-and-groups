@@ -18,6 +18,11 @@ notebooks/checkpoint*
 notebooks/W-weights.pdf
 notebooks/predictions.pdf
 artifacts/constructed_networks/
+trained_networks/notebooks/figs/
+trained_networks/notebooks/figs_temp/
+trained_networks/notebooks/figures/
+trained_networks/notebooks/saved_models/
+trained_networks/notebooks/checkpoint*
 
 runs/
 data/
