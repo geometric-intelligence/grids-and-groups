@@ -1,19 +1,27 @@
-"""Closed-form QuadraticRNN construction for finite-group actions.
+"""Closed-form, fixed-weight PyTorch RNNs for finite-group actions.
 
 The construction is group-agnostic.  A group must expose ``order``,
-``elements()``, ``irreps()``, ``left_action()``, ``identity()``, and
-``compose()``.  Irreps may be dense or lazy as long as they expose ``dim`` and
-are callable on an element index.
+``elements()``, ``irreps()``, and ``regular_rep()``.  Groups that additionally
+provide ``identity()``, ``inverse()``, and ``compose()`` avoid reconstructing
+those operations from the regular representation.  Irreps may be dense or lazy
+as long as they expose ``dim`` and are callable on an element index.
+
+The analytical weights are registered as PyTorch buffers, not parameters.
+Consequently, constructing and evaluating :class:`FiniteGroupRNN` never
+performs training or optimization.
 """
 
-from dataclasses import dataclass
-
 import numpy as np
+import torch
+from torch import nn
+from torch.nn import functional as F
+
+from src.groups.opposite import as_action_group, opposite_irrep
 
 
-def squared_relu(values: np.ndarray) -> np.ndarray:
+def squared_relu(values: torch.Tensor) -> torch.Tensor:
     """Elementwise squared ReLU."""
-    return np.maximum(0, values) ** 2
+    return torch.relu(values).square()
 
 
 def _irrep_matrices(irrep, group_order: int) -> np.ndarray:
@@ -74,7 +82,13 @@ def random_invertible_encoding(
 
 def hidden_width(irrep, *, q_rho: int = 3) -> int:
     """Number of hidden units contributed by one irrep."""
+    _validate_q_rho(q_rho)
     return 4 * q_rho * irrep.dim**3
+
+
+def _validate_q_rho(q_rho: int) -> None:
+    if isinstance(q_rho, bool) or not isinstance(q_rho, (int, np.integer)) or q_rho < 3:
+        raise ValueError("q_rho must be an integer greater than or equal to 3")
 
 
 def select_irreps_by_power(
@@ -135,14 +149,28 @@ def _amplitude_factors(
     q_rho: int,
     group_order: int,
     mode: str,
+    multipliers: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> tuple[float, float, float]:
     product = irrep_dim / (q_rho * group_order)
     if mode == "balanced":
         amplitude = product ** (1 / 3)
-        return amplitude, amplitude, amplitude
-    if mode == "put_on_drive":
-        return 1.0, product, 1.0
-    raise ValueError("amplitude_mode must be 'balanced' or 'put_on_drive'")
+        baseline = np.asarray((amplitude, amplitude, amplitude))
+    elif mode == "put_on_drive":
+        baseline = np.asarray((1.0, product, 1.0))
+    else:
+        raise ValueError("amplitude_mode must be 'balanced' or 'put_on_drive'")
+
+    multipliers_array = np.asarray(multipliers, dtype=float)
+    if multipliers_array.shape != (3,):
+        raise ValueError("amplitude_multipliers must contain exactly three values")
+    if not np.all(np.isfinite(multipliers_array)) or np.any(multipliers_array <= 0):
+        raise ValueError("amplitude_multipliers must be finite and positive")
+    if not np.isclose(np.prod(multipliers_array), 1.0):
+        raise ValueError(
+            "amplitude_multipliers must have product one to preserve the "
+            "closed-form RNN identity"
+        )
+    return tuple(baseline * multipliers_array)
 
 
 def _matrix_unit(dim: int, row: int, column: int) -> np.ndarray:
@@ -155,32 +183,216 @@ def _trace_features(irrep_matrices: np.ndarray, matrix: np.ndarray) -> np.ndarra
     return np.real(np.einsum("gab,ba->g", irrep_matrices, matrix))
 
 
-@dataclass
-class FiniteGroupRNNParams:
-    """Weights and irrep metadata for a closed-form finite-group RNN."""
+class FiniteGroupRNN(nn.Module):
+    """Analytically constructed recurrent network with fixed PyTorch weights.
 
-    group: object
-    irreps: list
-    all_irreps: list
-    selected_irrep_indices: list[int]
-    q_rho: int
-    x_ego: np.ndarray
-    W_in: np.ndarray
-    W_drive: np.ndarray
-    W_out: np.ndarray
-    metadata: list[dict]
-    amplitude_mode: str
-    W_mix: np.ndarray | None = None
+    ``W_in``, ``W_drive``, ``W_out``, and the optional dense ``W_mix`` are
+    buffers rather than :class:`torch.nn.Parameter` objects.  They therefore
+    move with :meth:`~torch.nn.Module.to` and appear in ``state_dict()``, but
+    are excluded from ``parameters()`` and are not trainable.
+
+    The default recurrence keeps mixing factored as
+    ``W_in @ (W_out @ hidden)`` to avoid allocating a hidden-by-hidden matrix.
+    """
+
+    def __init__(
+        self,
+        *,
+        group,
+        physical_group,
+        action_side: str,
+        irreps: list,
+        all_irreps: list,
+        selected_irrep_indices: list[int],
+        q_rho: int,
+        x_ego: np.ndarray,
+        W_in: np.ndarray,
+        W_drive: np.ndarray,
+        W_out: np.ndarray,
+        metadata: list[dict],
+        amplitude_mode: str,
+        amplitude_multipliers: tuple[float, float, float],
+        W_mix: np.ndarray | None = None,
+    ) -> None:
+        super().__init__()
+        self.group = group
+        self.physical_group = physical_group
+        self.action_side = action_side
+        self.irreps = list(irreps)
+        self.all_irreps = list(all_irreps)
+        self.selected_irrep_indices = list(selected_irrep_indices)
+        self.q_rho = q_rho
+        self.metadata = list(metadata)
+        self.amplitude_mode = amplitude_mode
+        self.amplitude_multipliers = amplitude_multipliers
+
+        self.register_buffer("x_ego", torch.as_tensor(x_ego, dtype=torch.float64))
+        self.register_buffer("W_in", torch.as_tensor(W_in, dtype=torch.float64))
+        self.register_buffer("W_drive", torch.as_tensor(W_drive, dtype=torch.float64))
+        self.register_buffer("W_out", torch.as_tensor(W_out, dtype=torch.float64))
+        self.register_buffer(
+            "W_mix",
+            None if W_mix is None else torch.as_tensor(W_mix, dtype=torch.float64),
+        )
 
     @property
     def hidden_dim(self) -> int:
         return self.W_in.shape[0]
 
-    def apply_mix(self, hidden: np.ndarray) -> np.ndarray:
+    @property
+    def group_size(self) -> int:
+        return self.W_in.shape[1]
+
+    def _as_tensor(self, values) -> torch.Tensor:
+        return torch.as_tensor(values, dtype=self.W_in.dtype, device=self.W_in.device)
+
+    def apply_mix(self, hidden: torch.Tensor) -> torch.Tensor:
         """Apply ``W_in W_out`` without requiring a dense hidden-by-hidden matrix."""
+        hidden = self._as_tensor(hidden)
         if self.W_mix is not None:
-            return self.W_mix @ hidden
-        return self.W_in @ (self.W_out @ hidden)
+            return F.linear(hidden, self.W_mix)
+        return F.linear(F.linear(hidden, self.W_out), self.W_in)
+
+    def _run(
+        self,
+        x_allo,
+        drives,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return all outputs and hidden states for encoded drive signals."""
+        x_allo = self._as_tensor(x_allo)
+        drives = self._as_tensor(drives)
+
+        if x_allo.ndim == 1:
+            x_allo = x_allo.unsqueeze(0)
+        if drives.ndim == 2:
+            drives = drives.unsqueeze(0)
+        if x_allo.ndim != 2 or x_allo.shape[-1] != self.group_size:
+            raise ValueError(
+                f"x_allo must have shape ({self.group_size},) or "
+                f"(batch, {self.group_size}), got {tuple(x_allo.shape)}"
+            )
+        if drives.ndim != 3 or drives.shape[-1] != self.group_size:
+            raise ValueError(
+                f"drives must have shape (steps, {self.group_size}) or "
+                f"(batch, steps, {self.group_size}), got {tuple(drives.shape)}"
+            )
+        if drives.shape[1] == 0:
+            raise ValueError("drives must contain at least one step")
+        if x_allo.shape[0] != drives.shape[0]:
+            if x_allo.shape[0] == 1:
+                x_allo = x_allo.expand(drives.shape[0], -1)
+            elif drives.shape[0] == 1:
+                drives = drives.expand(x_allo.shape[0], -1, -1)
+            else:
+                raise ValueError("x_allo and drives batch dimensions must match")
+
+        hidden = squared_relu(
+            F.linear(x_allo, self.W_in)
+            + F.linear(drives[:, 0], self.W_drive)
+        )
+        hidden_states = [hidden]
+        outputs = [F.linear(hidden, self.W_out)]
+        for step in range(1, drives.shape[1]):
+            hidden = squared_relu(
+                self.apply_mix(hidden)
+                + F.linear(drives[:, step], self.W_drive)
+            )
+            hidden_states.append(hidden)
+            outputs.append(F.linear(hidden, self.W_out))
+        return torch.stack(outputs, dim=1), torch.stack(hidden_states, dim=1)
+
+    def forward(
+        self,
+        x_allo,
+        drives,
+        *,
+        return_all_outputs: bool = False,
+    ) -> torch.Tensor:
+        """Evaluate encoded drive signals with optional batched leading axes.
+
+        Args:
+            x_allo: Allocentric signal with shape ``(group_size,)`` or
+                ``(batch, group_size)``.
+            drives: Egocentric drive signals with shape
+                ``(steps, group_size)`` or ``(batch, steps, group_size)``.
+            return_all_outputs: Return one output per drive rather than only
+                the final output.
+        """
+        unbatched = torch.as_tensor(x_allo).ndim == 1 and torch.as_tensor(drives).ndim == 2
+        outputs, _ = self._run(x_allo, drives)
+        result = outputs if return_all_outputs else outputs[:, -1]
+        return result.squeeze(0) if unbatched else result
+
+    def encode_drives(self, sequence) -> np.ndarray:
+        """Encode group elements using this model's action convention."""
+        x_ego = self.x_ego.detach().cpu().numpy()
+        sequence = [int(element) for element in sequence]
+        if not sequence:
+            raise ValueError("sequence must contain at least one group element")
+        return np.stack(
+            [self.group.left_action(element, x_ego) for element in sequence]
+        )
+
+    def rollout(self, x_allo, sequence) -> dict[str, torch.Tensor]:
+        """Evaluate group elements and return outputs, targets, and hidden states."""
+        sequence = [int(element) for element in sequence]
+        if not sequence:
+            raise ValueError("sequence must contain at least one group element")
+
+        drives = self.encode_drives(sequence)
+        outputs, hidden_states = self._run(x_allo, drives)
+
+        cumulative = self.group.identity()
+        cumulative_states = []
+        true_outputs = []
+        x_allo_array = (
+            x_allo.detach().cpu().numpy()
+            if isinstance(x_allo, torch.Tensor)
+            else np.asarray(x_allo)
+        )
+        if x_allo_array.ndim != 1:
+            raise ValueError("rollout currently expects one unbatched allocentric signal")
+        for element in sequence:
+            cumulative = self.group.compose(element, cumulative)
+            cumulative_states.append(cumulative)
+            true_outputs.append(self.group.left_action(cumulative, x_allo_array))
+
+        return {
+            "cumulative_states": torch.as_tensor(
+                cumulative_states, dtype=torch.long, device=self.W_in.device
+            ),
+            "true_outputs": self._as_tensor(np.asarray(true_outputs)),
+            "predicted_outputs": outputs.squeeze(0),
+            "hidden_states": hidden_states.squeeze(0),
+        }
+
+    def probe_hidden_states(
+        self,
+        x_allo,
+        *,
+        drive_element: int | None = None,
+    ) -> torch.Tensor:
+        """Evaluate static input tuning over all transformed allocentric signals."""
+        if drive_element is None:
+            drive_element = self.group.identity()
+        x_allo = (
+            x_allo.detach().cpu().numpy()
+            if isinstance(x_allo, torch.Tensor)
+            else np.asarray(x_allo)
+        )
+        allocentric_orbit = np.stack(
+            [
+                self.group.left_action(element, x_allo)
+                for element in self.group.elements()
+            ]
+        )
+        drive = self.group.left_action(
+            drive_element, self.x_ego.detach().cpu().numpy()
+        )
+        return squared_relu(
+            F.linear(self._as_tensor(allocentric_orbit), self.W_in)
+            + F.linear(self._as_tensor(drive), self.W_drive)
+        )
 
 
 def build_finite_group_rnn(
@@ -191,6 +403,7 @@ def build_finite_group_rnn(
     x_allo: np.ndarray | None = None,
     q_rho: int = 3,
     amplitude_mode: str = "balanced",
+    amplitude_multipliers: tuple[float, float, float] = (1.0, 1.0, 1.0),
     irrep_selection: str = "all",
     num_irreps: int | None = None,
     max_hidden_width: int | None = None,
@@ -198,7 +411,8 @@ def build_finite_group_rnn(
     always_include_trivial: bool = True,
     power_ranking: str = "power",
     materialize_mix: bool = False,
-) -> FiniteGroupRNNParams:
+    action_side: str = "right",
+) -> FiniteGroupRNN:
     """Build closed-form RNN weights from finite-group irreps.
 
     By default, the construction uses ``group.irreps()`` as the complete irrep
@@ -217,12 +431,29 @@ def build_finite_group_rnn(
     ``max_hidden_width`` can further restrict ``"power"`` selection by skipping
     irreps whose hidden-width contribution would exceed the budget.
 
+    ``action_side="right"`` uses body-frame updates: a state ``s`` followed by
+    a drive ``g`` becomes ``s * g``.  Internally this is the left action of the
+    opposite group.  Set ``action_side="left"`` to recover the spatial update
+    convention ``g * s``.
+
     ``q_rho`` is the per-irrep phase/multiplicity parameter in the closed-form
     construction.  An irrep of dimension ``d`` contributes
     ``4 * q_rho * d**3`` hidden units; with the default ``q_rho=3``, this is
     ``12 * d**3`` units per retained irrep.
+
+    ``amplitude_multipliers`` rescales the baseline
+    ``(A_u, A_v, A_w)`` factors. Its three entries must be positive and have
+    product one so the closed-form reconstruction identity remains unchanged.
     """
-    all_irreps = list(group.irreps() if irreps is None else irreps)
+    _validate_q_rho(q_rho)
+    physical_group = group
+    group = as_action_group(group, action_side)
+    if irreps is None:
+        all_irreps = list(group.irreps())
+    elif action_side == "right":
+        all_irreps = [opposite_irrep(irrep) for irrep in irreps]
+    else:
+        all_irreps = list(irreps)
     x_ego = np.asarray(x_ego)
     if x_ego.shape != (group.order,):
         raise ValueError(f"x_ego must have shape ({group.order},), got {x_ego.shape}")
@@ -269,7 +500,11 @@ def build_finite_group_rnn(
             )
         xhat_inv_dagger = np.linalg.inv(xhat.conj().T)
         amplitude_in, amplitude_drive, amplitude_out = _amplitude_factors(
-            dim, q_rho, group.order, amplitude_mode
+            dim,
+            q_rho,
+            group.order,
+            amplitude_mode,
+            amplitude_multipliers,
         )
 
         for eps1, eps2 in sign_pairs:
@@ -312,8 +547,10 @@ def build_finite_group_rnn(
     W_drive = np.asarray(rows_drive)
     W_out = np.asarray(columns_out).T
     W_mix = W_in @ W_out if materialize_mix else None
-    return FiniteGroupRNNParams(
+    return FiniteGroupRNN(
         group=group,
+        physical_group=physical_group,
+        action_side=action_side,
         irreps=selected_irreps,
         all_irreps=all_irreps,
         selected_irrep_indices=selected_indices,
@@ -325,72 +562,28 @@ def build_finite_group_rnn(
         W_mix=W_mix,
         metadata=metadata,
         amplitude_mode=amplitude_mode,
+        amplitude_multipliers=tuple(float(value) for value in amplitude_multipliers),
     )
 
 
-def forward_sequence(
-    params: FiniteGroupRNNParams,
-    x_allo: np.ndarray,
-    sequence,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return final output and hidden state for a nonempty drive sequence."""
-    sequence = list(sequence)
-    if not sequence:
-        raise ValueError("sequence must contain at least one group element")
-    group = params.group
-    hidden = squared_relu(
-        params.W_in @ x_allo + params.W_drive @ group.left_action(sequence[0], params.x_ego)
-    )
-    for element in sequence[1:]:
-        hidden = squared_relu(
-            params.apply_mix(hidden) + params.W_drive @ group.left_action(element, params.x_ego)
-        )
-    return params.W_out @ hidden, hidden
-
-
-def rollout(params: FiniteGroupRNNParams, x_allo: np.ndarray, sequence) -> dict[str, np.ndarray]:
-    """Return predictions, exact action targets, hidden states, and group states."""
-    group = params.group
-    cumulative = group.identity()
-    hidden = None
-    cumulative_states = []
-    true_outputs = []
-    predicted_outputs = []
-    hidden_states = []
-
-    for step, element in enumerate(sequence):
-        element = int(element)
-        cumulative = group.compose(element, cumulative)
-        drive = params.W_drive @ group.left_action(element, params.x_ego)
-        if step == 0:
-            hidden = squared_relu(params.W_in @ x_allo + drive)
-        else:
-            hidden = squared_relu(params.apply_mix(hidden) + drive)
-        predicted = params.W_out @ hidden
-        cumulative_states.append(cumulative)
-        true_outputs.append(group.left_action(cumulative, x_allo))
-        predicted_outputs.append(predicted)
-        hidden_states.append(hidden.copy())
-
+def rollout(model: FiniteGroupRNN, x_allo, sequence) -> dict[str, np.ndarray]:
+    """Compatibility wrapper returning NumPy rollout arrays."""
     return {
-        "cumulative_states": np.asarray(cumulative_states),
-        "true_outputs": np.asarray(true_outputs),
-        "predicted_outputs": np.asarray(predicted_outputs),
-        "hidden_states": np.asarray(hidden_states),
+        key: value.detach().cpu().numpy()
+        for key, value in model.rollout(x_allo, sequence).items()
     }
 
 
 def probe_hidden_states(
-    params: FiniteGroupRNNParams,
-    x_allo: np.ndarray,
+    model: FiniteGroupRNN,
+    x_allo,
     *,
     drive_element: int | None = None,
 ) -> np.ndarray:
-    """Evaluate static input tuning over all transformed allocentric signals."""
-    group = params.group
-    if drive_element is None:
-        drive_element = group.identity()
-    drive = params.W_drive @ group.left_action(drive_element, params.x_ego)
-    return np.asarray(
-        [squared_relu(params.W_in @ group.left_action(g, x_allo) + drive) for g in group.elements()]
+    """Compatibility wrapper returning a NumPy static-response array."""
+    return (
+        model.probe_hidden_states(x_allo, drive_element=drive_element)
+        .detach()
+        .cpu()
+        .numpy()
     )
