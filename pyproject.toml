@@ -33,6 +33,9 @@ seaborn = "^0.13.2"
 jupyter-black = "^0.4.0"
 umap-learn = "^0.5.12"
 ripser = "^0.6.15"
+plotly = "^6.9.0"
+anywidget = "^0.11.0"
+jupytext = "*"
 
 
 [build-system]
@@ -73,6 +76,9 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["src", "trained_networks", "group_agf", "default_config"]
 known-third-party = ["wandb"]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/constructed_networks/*.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["test", "trained_networks/tests"]
