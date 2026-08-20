@@ -42,6 +42,7 @@ from src.geometry.discrete_se2 import (
     decode_pose,
     gaussian_bump,
     make_momentum_motion_sequence,
+    periodic_spatial_autocorrelation,
     plot_lattice_scalar,
     spatial_marginal,
     transformed_pose,
@@ -64,12 +65,13 @@ np.set_printoptions(precision=3, suppress=True)
 # %%
 # Group and signal construction
 n_spatial = 10  # Side length of the periodic triangular translation lattice Z_n².
-n_orientations = 3  # Number of discrete headings; this notebook uses C_3.
+n_orientations = 6  # Number of discrete headings; this notebook uses C_m.
 initial_pose = (2, 2, 0)  # Initial allocentric state (x, y, heading index).
-allocentric_encoding = "one-hot"  # Spatial/orientation profile used for x_allo.
+allocentric_encoding = "one-hot space custom orientation"  # Profile used for x_allo.
 sigma = 1.0  # Spatial width when allocentric_encoding uses a Gaussian bump.
+custom_orientation_weights = (1.0, 0.7, 0.4, 0.3, 0.6, 0.8)  # One weight per discrete heading.
 encoding_seed = 10  # Seed for the random invertible egocentric template x_ego.
-action_side = "left"  # "right": body-frame s*g; "left": world-frame g*s.
+action_side = "right"  # "right": body-frame s*g; "left": world-frame g*s.
 
 # Closed-form network construction
 irrep_selection = "power"  # Rank retained irreps by Fourier power in x_allo.
@@ -130,14 +132,16 @@ umap_components = 3  # Embedding dimension used only for UMAP visualization.
 # %% [markdown]
 # ## 2. Group and signal encodings
 #
-# The allocentric encoding can independently use a one-hot or periodic-Gaussian spatial profile and a one-hot or uniform orientation profile. The special `"one-hot"` option is one-hot in both space and orientation. The egocentric code is sampled until every irrep Fourier block is invertible.
+# The allocentric encoding can independently use a one-hot or periodic-Gaussian spatial profile and a one-hot, uniform, or manually specified orientation profile. `custom_orientation_weights` supplies one value per discrete heading, allowing orientation to remain graded but decodable. The special `"one-hot"` option is one-hot in both space and orientation. The egocentric code is sampled until every irrep Fourier block is invertible.
 
 # %%
 encoding_options = {
     "one-hot",
     "one-hot space uniform orientation",
+    "one-hot space custom orientation",
     "gaussian space one-hot orientation",
     "gaussian space uniform orientation",
+    "gaussian space custom orientation",
 }
 if allocentric_encoding not in encoding_options:
     raise ValueError(
@@ -154,14 +158,33 @@ center_xy = initial_pose[:2]
 one_hot_space = allocentric_encoding in {
     "one-hot",
     "one-hot space uniform orientation",
+    "one-hot space custom orientation",
 }
 one_hot_orientation = allocentric_encoding in {
     "one-hot",
     "gaussian space one-hot orientation",
 }
+custom_orientation = allocentric_encoding in {
+    "one-hot space custom orientation",
+    "gaussian space custom orientation",
+}
 
-orientation_weights = np.zeros(G.m) if one_hot_orientation else np.ones(G.m)
-orientation_weights[initial_pose[2]] = 1.0
+if one_hot_orientation:
+    orientation_weights = np.zeros(G.m)
+    orientation_weights[initial_pose[2]] = 1.0
+elif custom_orientation:
+    orientation_weights = np.asarray(custom_orientation_weights, dtype=float)
+    if orientation_weights.shape != (G.m,):
+        raise ValueError(
+            f"custom_orientation_weights must have shape ({G.m},), "
+            f"got {orientation_weights.shape}"
+        )
+    if not np.all(np.isfinite(orientation_weights)) or np.any(orientation_weights < 0):
+        raise ValueError("custom_orientation_weights must be finite and nonnegative")
+    if np.allclose(orientation_weights, orientation_weights[0]):
+        raise ValueError("custom_orientation_weights must vary across headings")
+else:
+    orientation_weights = np.ones(G.m)
 
 if one_hot_space:
     x_allo = np.zeros(G.order)
@@ -539,7 +562,10 @@ steps = np.arange(1, len(exact_poses) + 1)
 time_cmap = plt.colormaps["viridis"]
 time_norm = mcolors.Normalize(vmin=steps[0], vmax=steps[-1])
 
-orientation_colors = ["#0072B2", "#E69F00", "#009E73"]
+orientation_colors = [
+    mcolors.to_hex(color)
+    for color in plt.get_cmap("hsv")(np.linspace(0, 1, G.m, endpoint=False))
+]
 orientation_cmap = mcolors.ListedColormap(orientation_colors[:G.m])
 orientation_norm = mcolors.BoundaryNorm(np.arange(-0.5, G.m + 0.5), G.m)
 
@@ -663,9 +689,8 @@ steps = np.arange(1, len(exact_poses) + 1)
 arrow_length = 0.9
 
 orientation_colors = [
-    "#0072B2",
-    "#E69F00",
-    "#009E73",
+    mcolors.to_hex(color)
+    for color in plt.get_cmap("hsv")(np.linspace(0, 1, G.m, endpoint=False))
 ]
 
 
@@ -939,6 +964,8 @@ plt.show()
 # These tuning curves are computed by translating the allocentric input through every group element while holding the egocentric drive fixed at the identity. Following the $C_n\times C_n$ notebook, we keep one canonical representative from each retained conjugate pair and order those nontrivial irreps deterministically by their Fourier-power contribution to `x_allo`, from largest to smallest. Each figure contains many neurons from one irrep; the variables below can cap either the irreps or neurons displayed.
 #
 # For every neuron, the first three panels show the complete orientation-conditioned spatial tuning $f(x,y,\theta)$ at the three discrete headings. Each slice is aligned to the common allocentric lattice frame, and all conditioned maps in an irrep share one raw-activation color scale. The fourth panel is the spatial marginal $\sum_\theta f(x,y,\theta)$, with a separate shared scale because summation changes its range. The final three-bar panel is the direction marginal $\sum_{x,y} f(x,y,\theta)$. The conditioned maps preserve conjunctive position-direction structure that either marginal alone would discard.
+#
+# A second figure for each irrep shows periodic spatial autocorrelograms for every orientation-conditioned map and for the orientation-summed map. Before correlation, each map's spatial mean is removed; the result is normalized to one at zero displacement, which is displayed at the center of the tilted axial grid.
 
 # %%
 # Sweep translated allocentric inputs while holding the egocentric drive fixed.
@@ -988,6 +1015,21 @@ for power_rank, irrep_index in enumerate(tuning_irreps, start=1):
     conditioned_maps = np.asarray(conditioned_maps)
     spatial_marginals = np.asarray(spatial_marginals)
     direction_marginals = np.asarray(direction_marginals)
+    conditioned_autocorrelations = np.asarray(
+        [
+            [
+                periodic_spatial_autocorrelation(conditioned_map)
+                for conditioned_map in unit_maps
+            ]
+            for unit_maps in conditioned_maps
+        ]
+    )
+    spatial_autocorrelations = np.asarray(
+        [
+            periodic_spatial_autocorrelation(spatial_marginal)
+            for spatial_marginal in spatial_marginals
+        ]
+    )
 
     conditioned_vmin = float(conditioned_maps.min())
     conditioned_vmax = float(conditioned_maps.max())
@@ -1015,6 +1057,7 @@ for power_rank, irrep_index in enumerate(tuning_irreps, start=1):
                 vmin=conditioned_vmin,
                 vmax=conditioned_vmax,
                 colorbar=False,
+                coordinate_mode="axial",
             )
         plot_lattice_scalar(
             spatial_marginals[row],
@@ -1023,6 +1066,7 @@ for power_rank, irrep_index in enumerate(tuning_irreps, start=1):
             vmin=marginal_vmin,
             vmax=marginal_vmax,
             colorbar=False,
+            coordinate_mode="axial",
         )
         direction_ax = axes[row, G.m + 1]
         direction_ax.bar(
@@ -1070,6 +1114,62 @@ for power_rank, irrep_index in enumerate(tuning_irreps, start=1):
         f"Power rank {power_rank}: irrep {irrep_index}; "
         f"x_allo power={irrep_power_fraction:.2%}; {len(units)} neurons\n"
         "Conjunctive position-direction tuning",
+        fontsize=14,
+    )
+    plt.show()
+
+    autocorrelation_figure, autocorrelation_axes = plt.subplots(
+        len(units),
+        G.m + 1,
+        figsize=(2.65 * (G.m + 1), 2.45 * len(units)),
+        constrained_layout=True,
+        squeeze=False,
+    )
+    for row, unit in enumerate(units):
+        metadata = params.metadata[int(unit)]
+        for rotation in range(G.m):
+            title = rf"$\theta={heading_degrees[rotation]:.0f}^\circ$"
+            if rotation == 0:
+                title = (
+                    f"unit {int(unit)}, $\\delta={metadata['delta']}$\n" + title
+                )
+            plot_lattice_scalar(
+                conditioned_autocorrelations[row, rotation],
+                ax=autocorrelation_axes[row, rotation],
+                title=title,
+                cmap="coolwarm",
+                vmin=-1.0,
+                vmax=1.0,
+                colorbar=False,
+                coordinate_mode="centered_axial",
+            )
+        plot_lattice_scalar(
+            spatial_autocorrelations[row],
+            ax=autocorrelation_axes[row, G.m],
+            title=rf"unit {int(unit)}: autocorr of $\sum_\theta f$",
+            cmap="coolwarm",
+            vmin=-1.0,
+            vmax=1.0,
+            colorbar=False,
+            coordinate_mode="centered_axial",
+        )
+
+    autocorrelation_colorbar = plt.cm.ScalarMappable(
+        norm=plt.Normalize(-1.0, 1.0),
+        cmap="coolwarm",
+    )
+    autocorrelation_colorbar.set_array([])
+    autocorrelation_figure.colorbar(
+        autocorrelation_colorbar,
+        ax=autocorrelation_axes.ravel(),
+        fraction=0.012,
+        pad=0.01,
+        label="normalized periodic autocorrelation",
+    )
+    autocorrelation_figure.suptitle(
+        f"Power rank {power_rank}: irrep {irrep_index}; "
+        f"x_allo power={irrep_power_fraction:.2%}; {len(units)} neurons\n"
+        "Spatial autocorrelograms",
         fontsize=14,
     )
     plt.show()

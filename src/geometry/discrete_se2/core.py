@@ -81,6 +81,27 @@ def align_rotation_slices(group, tensor: np.ndarray) -> np.ndarray:
     )
 
 
+def periodic_spatial_autocorrelation(values: np.ndarray) -> np.ndarray:
+    """Return normalized autocorrelation over all periodic axial-lattice shifts.
+
+    The spatial mean is removed before correlation, zero displacement is moved
+    to the center of the returned array, and nonconstant inputs are normalized
+    to have unit autocorrelation at zero displacement.
+    """
+    values = np.asarray(values, dtype=float)
+    if values.ndim != 2 or values.shape[0] != values.shape[1]:
+        raise ValueError(f"values must be a square two-dimensional array, got {values.shape}")
+
+    centered = values - values.mean()
+    energy = float(np.sum(centered**2))
+    if np.isclose(energy, 0.0):
+        return np.zeros_like(centered)
+
+    spectrum = np.fft.fft2(centered)
+    autocorrelation = np.fft.ifft2(spectrum * spectrum.conj()).real / energy
+    return np.clip(np.fft.fftshift(autocorrelation), -1.0, 1.0)
+
+
 def periodic_distance_squared(
     n: int,
     point: tuple[int, int],

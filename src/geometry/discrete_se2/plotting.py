@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from matplotlib import colors as mcolors
 from matplotlib.collections import PatchCollection
-from matplotlib.patches import RegularPolygon
+from matplotlib.patches import Polygon
 from plotly.subplots import make_subplots
 
 from .core import (
@@ -39,12 +39,17 @@ def plot_lattice_scalar(
         vmin=float(values.min()) if vmin is None else vmin,
         vmax=float(values.max()) if vmax is None else vmax,
     )
+    radius = 1 / np.sqrt(3)
+    corner_angles = np.pi / 6 + np.arange(6) * np.pi / 3
     patches = [
-        RegularPolygon(
-            (center_x, center_y),
-            numVertices=6,
-            radius=1 / np.sqrt(3),
-            orientation=np.pi / 6,
+        Polygon(
+            np.column_stack(
+                (
+                    center_x + radius * np.cos(corner_angles),
+                    center_y + radius * np.sin(corner_angles),
+                )
+            ),
+            closed=True,
         )
         for center_x, center_y in zip(x.ravel(), y.ravel())
     ]
@@ -57,7 +62,6 @@ def plot_lattice_scalar(
         linewidth=0.25,
     )
     ax.add_collection(artist)
-    radius = 1 / np.sqrt(3)
     ax.set_xlim(float(x.min()) - radius, float(x.max()) + radius)
     ax.set_ylim(float(y.min()) - radius, float(y.max()) + radius)
     ax.set_aspect("equal")
