@@ -15,6 +15,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import jupytext
+import nbformat
 import pytest
 
 
@@ -30,8 +32,12 @@ def get_notebooks_dir():
 
 # Notebooks to skip (with reasons)
 SKIP_NOTEBOOKS = {
-    # Add notebooks here if they need to be skipped, e.g.:
-    # "notebook_name": "Reason for skipping",
+    "rnn_constructed_discrete_se2_c6_tuning": (
+        "Full trajectory-tuning analysis is covered by focused unit tests"
+    ),
+    "rnn_constructed_discrete_se2_c6_manifolds": (
+        "Full manifold analysis is intentionally an interactive workflow"
+    ),
 }
 
 
@@ -46,13 +52,17 @@ def get_notebook_files():
 # Get list of notebooks for parametrization
 NOTEBOOKS = get_notebook_files()
 NOTEBOOK_IDS = [nb.stem for nb in NOTEBOOKS]
+C6_NOTEBOOK_STEMS = (
+    "rnn_constructed_discrete_se2_c6",
+    "rnn_constructed_discrete_se2_c6_tuning",
+    "rnn_constructed_discrete_se2_c6_manifolds",
+)
 
 
 @pytest.fixture(scope="module")
-def notebook_test_env():
+def notebook_execution_env():
     """Set up environment for notebook testing."""
     env = os.environ.copy()
-    env["NOTEBOOK_TEST_MODE"] = "1"
     repo_root = str(get_repo_root())
     env["PYTHONPATH"] = repo_root + os.pathsep + env.get("PYTHONPATH", "")
     return env
@@ -106,7 +116,7 @@ def execute_notebook(notebook_path, env):
 
 
 @pytest.mark.parametrize("notebook_path", NOTEBOOKS, ids=NOTEBOOK_IDS)
-def test_notebook_execution(notebook_path, notebook_test_env):
+def test_notebook_execution(notebook_path, notebook_execution_env):
     """
     Test that a notebook executes without errors.
     """
@@ -118,7 +128,7 @@ def test_notebook_execution(notebook_path, notebook_test_env):
 
     assert notebook_path.exists(), f"Notebook not found: {notebook_path}"
 
-    success, error_msg = execute_notebook(notebook_path, notebook_test_env)
+    success, error_msg = execute_notebook(notebook_path, notebook_execution_env)
 
     if not success:
         pytest.fail(f"Notebook {notebook_path.name} failed to execute:\n{error_msg}")
@@ -134,6 +144,34 @@ def test_at_least_one_notebook_exists():
     """Test that there is at least one notebook to test."""
     notebooks = get_notebook_files()
     assert len(notebooks) > 0, "No notebooks found in notebooks/ directory"
+
+
+@pytest.mark.parametrize("stem", C6_NOTEBOOK_STEMS)
+def test_split_c6_jupytext_pairs_are_synchronized(stem):
+    notebooks_dir = get_notebooks_dir()
+    source_path = notebooks_dir / f"{stem}.py"
+    snapshot_path = notebooks_dir / f"{stem}.ipynb"
+
+    assert source_path.exists()
+    assert snapshot_path.exists()
+    source_notebook = jupytext.read(source_path, fmt="py:percent")
+    snapshot_notebook = nbformat.read(snapshot_path, as_version=4)
+    source_cells = [
+        (cell.cell_type, cell.source) for cell in source_notebook.cells
+    ]
+    snapshot_cells = [
+        (cell.cell_type, cell.source) for cell in snapshot_notebook.cells
+    ]
+
+    assert snapshot_cells == source_cells
+
+
+def test_legacy_discrete_se2_notebook_was_replaced():
+    notebooks_dir = get_notebooks_dir()
+    for suffix in (".py", ".ipynb"):
+        assert not (
+            notebooks_dir / f"rnn_constructed_discrete_SE2_m3{suffix}"
+        ).exists()
 
 
 if __name__ == "__main__":
