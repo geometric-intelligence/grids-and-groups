@@ -3,22 +3,29 @@
 import numpy as np
 import pytest
 
-from src.cnxcn_geometry import (
+from src.finite_group_rnn import (
+    build_finite_group_rnn,
+    hidden_width,
+    random_invertible_encoding,
+    rollout,
+    select_irreps_by_power,
+)
+from src.geometry.cnxcn import (
     center_errors as cnxcn_center_errors,
 )
-from src.cnxcn_geometry import (
+from src.geometry.cnxcn import (
     decode_spatial_argmax as decode_cnxcn_argmax,
 )
-from src.cnxcn_geometry import (
+from src.geometry.cnxcn import (
     gaussian_bump as cnxcn_gaussian_bump,
 )
-from src.cnxcn_geometry import (
+from src.geometry.cnxcn import (
     make_momentum_motion_sequence as make_cnxcn_motion_sequence,
 )
-from src.cnxcn_geometry import (
+from src.geometry.cnxcn import (
     transformed_center as transformed_cnxcn_center,
 )
-from src.discrete_se2_geometry import (
+from src.geometry.discrete_se2 import (
     align_rotation_slice,
     center_errors_periodic_triangular,
     decode_spatial_argmax,
@@ -30,10 +37,10 @@ from src.discrete_se2_geometry import (
     signal_to_tensor,
     transformed_center,
 )
-from src.discrete_se3_geometry import (
+from src.geometry.discrete_se3 import (
     align_rotation_slice as align_rotation_volume,
 )
-from src.discrete_se3_geometry import (
+from src.geometry.discrete_se3 import (
     decode_pose,
     gaussian_landmark,
     orientation_energy,
@@ -42,15 +49,8 @@ from src.discrete_se3_geometry import (
     spatial_energy,
     transformed_pose,
 )
-from src.discrete_se3_geometry import (
+from src.geometry.discrete_se3 import (
     periodic_distance_squared as periodic_distance_squared_3d,
-)
-from src.finite_group_rnn import (
-    build_finite_group_rnn,
-    hidden_width,
-    random_invertible_encoding,
-    rollout,
-    select_irreps_by_power,
 )
 from src.groups.cnxcn import ProductCyclicGroup
 from src.groups.znxzn_cm import DiscreteSE2Group
