@@ -1,4 +1,4 @@
-"""Triangular-lattice geometry for ``Z_n² ⋊ C_3`` experiments."""
+"""Triangular-lattice geometry for ``Z_n² ⋊ C_m`` experiments."""
 
 from .core import (
     advanced_pose,
@@ -18,8 +18,10 @@ from .core import (
 from .decoding import (
     center_errors_periodic_triangular,
     decode_centers_from_outputs,
+    decode_elements_from_template_orbit,
     decode_orientation_argmax,
     decode_pose,
+    decode_poses_from_template_orbit,
     decode_spatial_argmax,
     orientation_marginal,
     spatial_marginal,
@@ -33,7 +35,12 @@ from .plotting import (
     plot_lattice_trajectory,
     plotly_heading_stacks,
 )
-from .trajectories import TRACK_COLOR, make_momentum_motion_sequence
+from .trajectories import (
+    TRACK_COLOR,
+    NaturalisticMotionConfig,
+    make_momentum_motion_sequence,
+    make_naturalistic_motion_sequence,
+)
 
 __all__ = [
     "advanced_pose",
@@ -42,14 +49,18 @@ __all__ = [
     "align_rotation_slices",
     "center_errors_periodic_triangular",
     "decode_centers_from_outputs",
+    "decode_elements_from_template_orbit",
     "decode_orientation_argmax",
     "decode_pose",
+    "decode_poses_from_template_orbit",
     "decode_spatial_argmax",
     "gaussian_bump",
     "lattice_coordinates",
     "lattice_path_coordinates",
     "linked_plotly_html",
     "make_momentum_motion_sequence",
+    "make_naturalistic_motion_sequence",
+    "NaturalisticMotionConfig",
     "offset_coordinates",
     "orientation_marginal",
     "periodic_distance_squared",

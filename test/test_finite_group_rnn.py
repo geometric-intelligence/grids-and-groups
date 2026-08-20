@@ -28,19 +28,23 @@ from src.geometry.cnxcn import (
     transformed_center as transformed_cnxcn_center,
 )
 from src.geometry.discrete_se2 import (
-    advanced_pose as advance_se2_pose,
-)
-from src.geometry.discrete_se2 import (
+    NaturalisticMotionConfig,
     align_rotation_slice,
     center_errors_periodic_triangular,
+    decode_elements_from_template_orbit,
+    decode_poses_from_template_orbit,
     decode_spatial_argmax,
     gaussian_bump,
     lattice_path_coordinates,
     make_momentum_motion_sequence,
+    make_naturalistic_motion_sequence,
     offset_coordinates,
     periodic_distance_squared,
     signal_to_tensor,
     transformed_center,
+)
+from src.geometry.discrete_se2 import (
+    advanced_pose as advance_se2_pose,
 )
 from src.geometry.discrete_se2 import (
     decode_pose as decode_se2_pose,
@@ -63,6 +67,7 @@ from src.geometry.discrete_se3 import (
 from src.geometry.discrete_se3 import (
     periodic_distance_squared as periodic_distance_squared_3d,
 )
+from src.groups import as_action_group
 from src.groups.cnxcn import ProductCyclicGroup
 from src.groups.znxzn_cm import DiscreteSE2Group
 from src.groups.znxznxzn_oh import DiscreteSE3Group
@@ -317,6 +322,59 @@ def test_rotating_momentum_sequence_keeps_transformed_pose_in_bounds():
         assert 1 <= y <= 6
 
 
+@pytest.mark.parametrize("action_side", ["left", "right"])
+def test_naturalistic_sequence_is_reproducible_local_and_bounded(action_side):
+    group = DiscreteSE2Group(n=10, m=6)
+    initial_pose = (2, 2, 1)
+    kwargs = {
+        "steps": 80,
+        "seed": 7,
+        "start_xy": (5, 5),
+        "initial_pose": initial_pose,
+        "margin": 1,
+        "action_side": action_side,
+        "config": NaturalisticMotionConfig(),
+    }
+
+    sequence = make_naturalistic_motion_sequence(group, **kwargs)
+    repeated = make_naturalistic_motion_sequence(group, **kwargs)
+
+    np.testing.assert_array_equal(sequence, repeated)
+    assert len(sequence) == kwargs["steps"]
+
+    pose = group.encode(*initial_pose)
+    ordinary_translations = {
+        (0, 0),
+        (1, 0),
+        (0, 1),
+        (group.n - 1, 1),
+        (group.n - 1, 0),
+        (0, group.n - 1),
+        (1, group.n - 1),
+    }
+    for index, element in enumerate(sequence):
+        if action_side == "right":
+            pose = group.compose(pose, int(element))
+        else:
+            pose = group.compose(int(element), pose)
+        x, y, _ = group.decode(pose)
+        assert 1 <= x <= 8
+        assert 1 <= y <= 8
+        if index > 0 and action_side == "right":
+            dx, dy, rotation = group.decode(int(element))
+            assert (dx, dy) in ordinary_translations
+            assert rotation in {0, 1, group.m - 1}
+
+
+def test_naturalistic_sequence_requires_c6_and_normalized_probabilities():
+    with pytest.raises(ValueError, match="sum to 1"):
+        NaturalisticMotionConfig(forward_probability=0.5)
+
+    group = DiscreteSE2Group(n=8, m=3)
+    with pytest.raises(ValueError, match="requires C6"):
+        make_naturalistic_motion_sequence(group)
+
+
 def test_constructed_rnn_uses_body_frame_right_action():
     group = DiscreteSE2Group(n=5, m=4)
     current_pose = group.encode(2, 2, 1)
@@ -366,6 +424,54 @@ def test_center_errors_use_periodic_triangular_distance():
     errors = center_errors_periodic_triangular(group, predicted, exact)
 
     np.testing.assert_allclose(errors, [1.0, 0.0])
+
+
+@pytest.mark.parametrize("action_side", ["left", "right"])
+def test_template_orbit_decoder_jointly_recovers_distributed_pose(action_side):
+    group = DiscreteSE2Group(n=4, m=6)
+    initial_pose = (1, 1, 0)
+    template = gaussian_bump(
+        group,
+        center=initial_pose[:2],
+        sigma=1.0,
+        orientation_weights=np.asarray([1.0, 0.8, 0.4, 0.2, 0.4, 0.8]),
+    )
+    action_group = as_action_group(group, action_side)
+    elements = np.asarray(list(group.elements()))
+    signals = np.stack(
+        [action_group.left_action(int(element), template) for element in elements]
+    )
+
+    decoded_elements = decode_elements_from_template_orbit(
+        group,
+        signals,
+        template,
+        action_side=action_side,
+    )
+    decoded_poses = decode_poses_from_template_orbit(
+        group,
+        signals,
+        template,
+        initial_pose,
+        action_side=action_side,
+    )
+    if action_side == "right":
+        expected_poses = np.asarray(
+            [
+                advance_se2_pose(group, initial_pose, int(element))
+                for element in elements
+            ]
+        )
+    else:
+        expected_poses = np.asarray(
+            [
+                transformed_se2_pose(group, int(element), initial_pose)
+                for element in elements
+            ]
+        )
+
+    np.testing.assert_array_equal(decoded_elements, elements)
+    np.testing.assert_array_equal(decoded_poses, expected_poses)
 
 
 def test_gaussian_is_copied_across_rotations(group):

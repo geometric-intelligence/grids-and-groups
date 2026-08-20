@@ -2,11 +2,15 @@
 
 import numpy as np
 
+from src.groups import as_action_group
+
 from .core import (
+    advanced_pose,
     align_rotation_slices,
     periodic_distance_squared,
     signal_to_tensor,
     transformed_center,
+    transformed_pose,
 )
 
 
@@ -47,6 +51,74 @@ def decode_orientation_argmax(group, signal: np.ndarray) -> int:
 def decode_pose(group, signal: np.ndarray) -> tuple[int, int, int]:
     """Decode position and orientation marginals as one pose."""
     return (*decode_spatial_argmax(group, signal), decode_orientation_argmax(group, signal))
+
+
+def decode_elements_from_template_orbit(
+    group,
+    signals: np.ndarray,
+    template: np.ndarray,
+    *,
+    action_side: str = "right",
+) -> np.ndarray:
+    """Jointly decode group elements by matching a transformed template orbit.
+
+    Every regular action is a permutation, so all candidate orbit templates
+    have equal norm. Maximizing their inner product with a signal is therefore
+    equivalent to choosing the nearest orbit template in Euclidean distance.
+    """
+    signals = np.asarray(signals, dtype=float)
+    template = np.asarray(template, dtype=float)
+    if template.shape != (group.order,):
+        raise ValueError(
+            f"template must have shape ({group.order},), got {template.shape}"
+        )
+    if signals.ndim < 1 or signals.shape[-1] != group.order:
+        raise ValueError(
+            "signals must have final dimension equal to the group order, "
+            f"got {signals.shape}"
+        )
+
+    action_group = as_action_group(group, action_side)
+    orbit = np.stack(
+        [
+            action_group.left_action(element, template)
+            for element in action_group.elements()
+        ]
+    )
+    flattened = signals.reshape(-1, group.order)
+    decoded = np.argmax(flattened @ orbit.T, axis=1)
+    return decoded.reshape(signals.shape[:-1])
+
+
+def decode_poses_from_template_orbit(
+    group,
+    signals: np.ndarray,
+    template: np.ndarray,
+    initial_pose: tuple[int, int, int],
+    *,
+    action_side: str = "right",
+) -> np.ndarray:
+    """Jointly decode poses from signals in a known regular-action orbit."""
+    elements = np.asarray(
+        decode_elements_from_template_orbit(
+            group,
+            signals,
+            template,
+            action_side=action_side,
+        )
+    )
+    flattened = elements.reshape(-1)
+    if action_side == "right":
+        poses = [
+            advanced_pose(group, initial_pose, int(element))
+            for element in flattened
+        ]
+    else:
+        poses = [
+            transformed_pose(group, int(element), initial_pose)
+            for element in flattened
+        ]
+    return np.asarray(poses, dtype=int).reshape(*elements.shape, 3)
 
 
 def true_centers_from_cumulative_states(

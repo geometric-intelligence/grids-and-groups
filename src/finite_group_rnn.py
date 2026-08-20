@@ -334,6 +334,84 @@ class FiniteGroupRNN(nn.Module):
             [self.group.left_action(element, x_ego) for element in sequence]
         )
 
+    def selected_hidden_rollout(
+        self,
+        x_allo,
+        sequences,
+        hidden_indices,
+    ) -> torch.Tensor:
+        """Return selected hidden units for one or more element sequences.
+
+        Unlike :meth:`rollout`, this method does not retain full hidden states
+        or decoded outputs at every step.  It is intended for streaming
+        analyses whose recurrence still requires the complete current hidden
+        state but whose result uses only a small subset of units.
+
+        Args:
+            x_allo: One allocentric signal with shape ``(group_size,)``.
+            sequences: Element indices with shape ``(steps,)`` or
+                ``(batch, steps)``.
+            hidden_indices: One-dimensional collection of hidden-unit indices.
+
+        Returns:
+            Tensor with shape ``(steps, selected)`` for an unbatched sequence
+            or ``(batch, steps, selected)`` for batched sequences.
+        """
+        sequence_array = np.asarray(sequences, dtype=np.int64)
+        unbatched = sequence_array.ndim == 1
+        if unbatched:
+            sequence_array = sequence_array[None, :]
+        if sequence_array.ndim != 2 or sequence_array.shape[1] == 0:
+            raise ValueError("sequences must have shape (steps,) or (batch, steps)")
+        if np.any(sequence_array < 0) or np.any(sequence_array >= self.group_size):
+            raise ValueError("sequences contain an invalid group element")
+
+        selected = np.asarray(hidden_indices, dtype=np.int64)
+        if selected.ndim != 1 or selected.size == 0:
+            raise ValueError("hidden_indices must be a nonempty one-dimensional array")
+        if np.unique(selected).size != selected.size:
+            raise ValueError("hidden_indices must not contain duplicates")
+        if np.any(selected < 0) or np.any(selected >= self.hidden_dim):
+            raise ValueError("hidden_indices contain an invalid hidden-unit index")
+
+        x_allo_tensor = self._as_tensor(x_allo)
+        if x_allo_tensor.ndim != 1 or x_allo_tensor.shape[0] != self.group_size:
+            raise ValueError(f"x_allo must have shape ({self.group_size},)")
+        x_allo_tensor = x_allo_tensor.expand(sequence_array.shape[0], -1)
+        x_ego = self.x_ego.detach().cpu().numpy()
+        drives = self._as_tensor(
+            np.stack(
+                [
+                    np.stack(
+                        [
+                            self.group.left_action(int(element), x_ego)
+                            for element in sequence
+                        ]
+                    )
+                    for sequence in sequence_array
+                ]
+            )
+        )
+        selected_tensor = torch.as_tensor(
+            selected,
+            dtype=torch.long,
+            device=self.W_in.device,
+        )
+
+        hidden = squared_relu(
+            F.linear(x_allo_tensor, self.W_in)
+            + F.linear(drives[:, 0], self.W_drive)
+        )
+        selected_states = [hidden.index_select(1, selected_tensor)]
+        for step in range(1, drives.shape[1]):
+            hidden = squared_relu(
+                self.apply_mix(hidden)
+                + F.linear(drives[:, step], self.W_drive)
+            )
+            selected_states.append(hidden.index_select(1, selected_tensor))
+        result = torch.stack(selected_states, dim=1)
+        return result.squeeze(0) if unbatched else result
+
     def rollout(self, x_allo, sequence) -> dict[str, torch.Tensor]:
         """Evaluate group elements and return outputs, targets, and hidden states."""
         sequence = [int(element) for element in sequence]
