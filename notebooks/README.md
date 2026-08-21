@@ -38,8 +38,7 @@ jupytext --from py:percent --to ipynb \
 Execute the generated notebook separately when saved outputs are desired.
 Do not edit both formats independently.
 
-Each split C6 notebook begins with an **Execution contract**. The tuning
-notebook caches expensive occupancy statistics under the gitignored
+The tuning notebook caches expensive occupancy statistics under the gitignored
 `artifacts/constructed_networks/discrete_se2_c6/` directory. Plot changes do
 not invalidate that artifact.
 

@@ -26,7 +26,6 @@ class NaturalisticMotionConfig:
     backward_probability: float = 0.01
     turn_probability: float = 0.12
     turn_persistence: float = 0.20
-    reversal_weight: float = 0.05
     wall_lookahead: int = 3
     wall_avoidance_strength: float = 2.0
     minimum_wall_weight: float = 0.05
@@ -35,16 +34,11 @@ class NaturalisticMotionConfig:
         probabilities = {
             "stay_probability": self.stay_probability,
             "forward_probability": self.forward_probability,
-            "forward_left_or_right_probability": (
-                self.forward_left_or_right_probability
-            ),
-            "backward_left_or_right_probability": (
-                self.backward_left_or_right_probability
-            ),
+            "forward_left_or_right_probability": (self.forward_left_or_right_probability),
+            "backward_left_or_right_probability": (self.backward_left_or_right_probability),
             "backward_probability": self.backward_probability,
             "turn_probability": self.turn_probability,
             "turn_persistence": self.turn_persistence,
-            "reversal_weight": self.reversal_weight,
             "minimum_wall_weight": self.minimum_wall_weight,
         }
         for name, value in probabilities.items():
@@ -59,10 +53,7 @@ class NaturalisticMotionConfig:
             + self.backward_probability
         )
         if not np.isclose(translation_total, 1.0):
-            raise ValueError(
-                "translation probabilities must sum to 1, "
-                f"got {translation_total}"
-            )
+            raise ValueError(f"translation probabilities must sum to 1, got {translation_total}")
         if 2 * self.turn_probability > 1:
             raise ValueError(
                 "turn_probability is assigned to both left and right turns, "
@@ -72,13 +63,8 @@ class NaturalisticMotionConfig:
             raise ValueError("wall_lookahead must be an integer greater than 0")
         if not isinstance(self.wall_lookahead, (int, np.integer)):
             raise ValueError("wall_lookahead must be an integer greater than 0")
-        if (
-            not np.isfinite(self.wall_avoidance_strength)
-            or self.wall_avoidance_strength < 0
-        ):
-            raise ValueError(
-                "wall_avoidance_strength must be finite and nonnegative"
-            )
+        if not np.isfinite(self.wall_avoidance_strength) or self.wall_avoidance_strength < 0:
+            raise ValueError("wall_avoidance_strength must be finite and nonnegative")
 
 
 def make_naturalistic_motion_sequence(
@@ -98,9 +84,7 @@ def make_naturalistic_motion_sequence(
     body-relative translation are sampled jointly.  Candidate actions that
     cross the display boundary are removed, and headings with little forward
     clearance are smoothly downweighted.  Reverse and oblique locomotion remain
-    possible according to ``config``.  Exact immediate reversals are not
-    forbidden, but their weight is multiplied by ``reversal_weight`` to model
-    positive short-timescale velocity autocorrelation.
+    possible according to ``config``.
 
     The first returned element relocates ``initial_pose`` (or the identity) to
     ``start_xy``.  Later elements use the requested physical action convention:
@@ -111,8 +95,7 @@ def make_naturalistic_motion_sequence(
     """
     if group.m != 6:
         raise ValueError(
-            "naturalistic heading-coupled motion requires C6 orientations, "
-            f"got C{group.m}"
+            f"naturalistic heading-coupled motion requires C6 orientations, got C{group.m}"
         )
     if isinstance(steps, bool) or not isinstance(steps, (int, np.integer)):
         raise ValueError("steps must be a positive integer")
@@ -144,10 +127,7 @@ def make_naturalistic_motion_sequence(
         return group.compose(next_pose, group.inverse(current))
 
     def inside_bounds(x_value: int, y_value: int) -> bool:
-        return (
-            margin <= x_value <= n - 1 - margin
-            and margin <= y_value <= n - 1 - margin
-        )
+        return margin <= x_value <= n - 1 - margin and margin <= y_value <= n - 1 - margin
 
     def forward_clearance(
         x_value: int,
@@ -192,7 +172,6 @@ def make_naturalistic_motion_sequence(
         dtype=float,
     )
     previous_turn = 0
-    previous_world_step = None
 
     for _ in range(steps - 1):
         turn_weights = (1 - config.turn_persistence) * base_turn_weights
@@ -202,9 +181,7 @@ def make_naturalistic_motion_sequence(
         candidate_weights = []
         for turn_index, turn in enumerate(turn_values):
             next_heading = (heading + int(turn)) % group.m
-            for translation_index, relative_direction in enumerate(
-                relative_directions
-            ):
+            for translation_index, relative_direction in enumerate(relative_directions):
                 dx_world, dy_world = group.apply_rotation(
                     next_heading,
                     int(relative_direction[0]),
@@ -218,26 +195,15 @@ def make_naturalistic_motion_sequence(
                     continue
 
                 clearance_fraction = (
-                    forward_clearance(x_next, y_next, next_heading)
-                    / config.wall_lookahead
+                    forward_clearance(x_next, y_next, next_heading) / config.wall_lookahead
                 )
                 wall_weight = (
                     config.minimum_wall_weight
                     + (1 - config.minimum_wall_weight) * clearance_fraction
                 ) ** config.wall_avoidance_strength
                 weight = (
-                    turn_weights[turn_index]
-                    * translation_weights[translation_index]
-                    * wall_weight
+                    turn_weights[turn_index] * translation_weights[translation_index] * wall_weight
                 )
-                world_step = (dx_world, dy_world)
-                if (
-                    previous_world_step is not None
-                    and world_step != (0, 0)
-                    and world_step
-                    == (-previous_world_step[0], -previous_world_step[1])
-                ):
-                    weight *= config.reversal_weight
                 if weight <= 0:
                     continue
                 next_pose = group.encode(x_next, y_next, next_heading)
@@ -248,7 +214,6 @@ def make_naturalistic_motion_sequence(
                         y_next,
                         next_heading,
                         int(turn),
-                        world_step,
                     )
                 )
                 candidate_weights.append(weight)
@@ -267,12 +232,9 @@ def make_naturalistic_motion_sequence(
             y,
             heading,
             previous_turn,
-            chosen_world_step,
         ) = candidates[chosen]
         sequence.append(relative_element(current_pose, next_pose))
         current_pose = next_pose
-        if chosen_world_step != (0, 0):
-            previous_world_step = chosen_world_step
 
     return np.asarray(sequence, dtype=int)
 
@@ -303,15 +265,10 @@ def make_momentum_motion_sequence(
         start_xy = (n // 2, n // 2)
     x = int(np.clip(start_xy[0], margin, n - 1 - margin))
     y = int(np.clip(start_xy[1], margin, n - 1 - margin))
-    directions = np.asarray(
-        [(1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)]
-    )
+    directions = np.asarray([(1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)])
 
     def inside_bounds(x_new, y_new):
-        return (
-            margin <= x_new <= n - 1 - margin
-            and margin <= y_new <= n - 1 - margin
-        )
+        return margin <= x_new <= n - 1 - margin and margin <= y_new <= n - 1 - margin
 
     heading = 0 if initial_pose is None else int(initial_pose[2]) % group.m
     base_pose = group.identity() if initial_pose is None else group.encode(*initial_pose)
@@ -326,24 +283,18 @@ def make_momentum_motion_sequence(
             for _ in range(max_resample):
                 proposed = direction_index
                 if not momentum or rng.random() < turn_probability:
-                    proposed = (direction_index + rng.choice([-1, 1])) % len(
-                        directions
-                    )
+                    proposed = (direction_index + rng.choice([-1, 1])) % len(directions)
                 dx, dy = directions[proposed]
                 if inside_bounds(x + dx, y + dy):
                     direction_index = proposed
                     accepted = True
                     break
-                direction_index = (
-                    direction_index + rng.choice([-1, 1])
-                ) % len(directions)
+                direction_index = (direction_index + rng.choice([-1, 1])) % len(directions)
             if not accepted:
                 dx, dy = 0, 0
         x += int(dx)
         y += int(dy)
-        rotation_step = (
-            int(rng.choice([0, 0, 0, 1, 2])) if include_rotations else 0
-        )
+        rotation_step = int(rng.choice([0, 0, 0, 1, 2])) if include_rotations else 0
         heading = (heading + rotation_step) % group.m
         next_pose = group.encode(x, y, heading)
         relative = group.compose(group.inverse(current_pose), next_pose)

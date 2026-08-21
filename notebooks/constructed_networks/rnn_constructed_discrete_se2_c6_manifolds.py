@@ -8,14 +8,6 @@
 # reconstructs the deterministic network, probes all transformed allocentric
 # inputs once, iterates a stratified pose sample to identity-update fixed points,
 # and analyzes retained irrep modules.
-#
-# ## Execution contract
-#
-# 1. Run **Construction and static probe** after changing the network.
-# 2. Run **Fixed-point pose sample** after changing spatial sampling or fixed-point
-#    settings.
-# 3. Run **Module topology** after changing module count, UMAP, or persistence
-#    settings. No trajectory-tuning artifact is read or invalidated.
 
 # %%
 import sys

@@ -74,20 +74,14 @@ class DiscreteSE2ExperimentConfig:
         if self.n_spatial < 2:
             raise ValueError("n_spatial must be at least 2")
         if self.allocentric_encoding not in _ENCODING_OPTIONS:
-            raise ValueError(
-                f"allocentric_encoding must be one of {sorted(_ENCODING_OPTIONS)}"
-            )
+            raise ValueError(f"allocentric_encoding must be one of {sorted(_ENCODING_OPTIONS)}")
         if self.action_side not in {"left", "right"}:
             raise ValueError("action_side must be 'left' or 'right'")
         if len(self.custom_orientation_weights) != self.n_orientations:
-            raise ValueError(
-                "custom_orientation_weights must have one value per orientation"
-            )
+            raise ValueError("custom_orientation_weights must have one value per orientation")
         weights = np.asarray(self.custom_orientation_weights, dtype=float)
         if not np.all(np.isfinite(weights)) or np.any(weights < 0):
-            raise ValueError(
-                "custom_orientation_weights must be finite and nonnegative"
-            )
+            raise ValueError("custom_orientation_weights must be finite and nonnegative")
         x, y, heading = self.initial_pose
         if not (
             0 <= x < self.n_spatial
@@ -201,7 +195,6 @@ def default_c6_motion_config() -> NaturalisticMotionConfig:
         backward_probability=0.01,
         turn_probability=0.12,
         turn_persistence=0.20,
-        reversal_weight=0.05,
         wall_lookahead=3,
         wall_avoidance_strength=2.0,
         minimum_wall_weight=0.05,

@@ -7,16 +7,6 @@
 # This notebook contains only group conventions, signal encodings, analytical
 # network construction, and one naturalistic rollout. Tuning and neural-manifold
 # analyses live in their own notebooks.
-#
-# ## Execution contract
-#
-# 1. Run **Configuration and construction** after changing group, encoding, or
-#    network parameters.
-# 2. Run **Naturalistic rollout** after changing motion or rollout parameters.
-# 3. Plot cells depend only on the `experiment` and `rollout` objects immediately
-#    above them. No expensive occupancy computation occurs in this notebook.
-# 4. Restart the kernel after changing dataclass definitions or adding exported
-#    library symbols; ordinary function edits are handled by autoreload.
 
 # %%
 import sys
@@ -34,9 +24,7 @@ if ipython is not None:
     ipython.run_line_magic("autoreload", "2")
 
 project_root = next(
-    parent
-    for parent in (Path.cwd(), *Path.cwd().parents)
-    if (parent / "src").is_dir()
+    parent for parent in (Path.cwd(), *Path.cwd().parents) if (parent / "src").is_dir()
 )
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
@@ -52,9 +40,7 @@ from src.geometry.discrete_se2 import (  # noqa: E402
     lattice_coordinates,
     lattice_path_coordinates,
     linked_plotly_html,
-    plot_lattice_scalar,
     plotly_heading_stacks,
-    spatial_marginal,
 )
 from src.groups import as_action_group  # noqa: E402
 
@@ -111,7 +97,6 @@ backward_left_or_right_probability = 0.005  # Each direction at ±120°.
 backward_probability = 0.01  # Move directly opposite the current heading.
 turn_probability = 0.12  # Each left or right 60° heading change.
 turn_persistence = 0.20  # Extra probability mass for repeating the previous turn.
-immediate_reversal_weight = 0.05  # Multiplier for immediate backtracking.
 wall_lookahead = 3  # Number of forward cells checked for an approaching wall.
 wall_avoidance_strength = 2.0  # Strength of steering away from nearby walls.
 minimum_wall_weight = 0.05  # Lowest pre-exponent weight for a wall-facing action.
@@ -128,11 +113,6 @@ rollout_start_xy = (n_spatial // 2, n_spatial // 2)
 # Rollout visualization
 # ----------------------------
 orientation_arrow_stride = 2
-snapshot_steps = (
-    0,
-    num_rollout_steps // 2,
-    num_rollout_steps - 1,
-)
 
 # Package the explicit values above. No defaults are relied upon here.
 experiment_config = DiscreteSE2ExperimentConfig(
@@ -163,7 +143,6 @@ motion_config = NaturalisticMotionConfig(
     backward_probability=backward_probability,
     turn_probability=turn_probability,
     turn_persistence=turn_persistence,
-    reversal_weight=immediate_reversal_weight,
     wall_lookahead=wall_lookahead,
     wall_avoidance_strength=wall_avoidance_strength,
     minimum_wall_weight=minimum_wall_weight,
@@ -174,7 +153,7 @@ rollout_config = DiscreteSE2RolloutConfig(
     margin=rollout_margin,
     start_xy=rollout_start_xy,
     arrow_stride=orientation_arrow_stride,
-    snapshot_steps=snapshot_steps,
+    snapshot_steps=(),
 )
 
 # %%
@@ -185,13 +164,15 @@ x_allo = experiment.x_allo
 x_ego = experiment.x_ego
 
 power = G.power_spectrum(x_allo)
-retained_power = (
-    power[params.selected_irrep_indices].sum() / power.sum()
+retained_power = power[params.selected_irrep_indices].sum() / power.sum()
+perfect_reconstruction_width = sum(
+    4 * experiment_config.q_rho * irrep.dim**2 for irrep in experiment.irreps
 )
 print(f"|G|: {G.order}")
 print(f"action side: {experiment_config.action_side}")
 print(f"selected irreps: {len(params.irreps)}/{len(experiment.irreps)}")
 print(f"hidden width: {params.hidden_dim:,}")
+print(f"theoretical perfect-reconstruction width (4q Σρ dim(ρ)²): {perfect_reconstruction_width:,}")
 print(f"retained Fourier power: {retained_power:.4%}")
 print("experiment configuration:", experiment_config)
 
@@ -279,10 +260,9 @@ display(
 # - rear-oblique: 0.5% in each direction;
 # - backward: 1%.
 #
-# Exact reversals remain possible but receive weight 0.05. Candidate actions
-# crossing the boundary are removed, and headings are reweighted using
-# three-cell forward lookahead. The first token only relocates the allocentric
-# template to the requested rollout start.
+# Candidate actions crossing the boundary are removed, and headings are
+# reweighted using three-cell forward lookahead. The first token only relocates
+# the allocentric template to the requested rollout start.
 
 # %%
 print("motion configuration:", motion_config)
@@ -291,10 +271,7 @@ local_support[list(experiment.local_egocentric_elements)] = 1.0
 support_figure = plotly_heading_stacks(
     G,
     [local_support],
-    titles=[
-        f"Right-action local support "
-        f"({len(experiment.local_egocentric_elements)} elements)"
-    ],
+    titles=[f"Right-action local support ({len(experiment.local_egocentric_elements)} elements)"],
     highlighted_elements=[experiment.local_egocentric_elements],
     coordinate_mode="centered_axial",
     width=720,
@@ -322,9 +299,7 @@ print(
     f"max={rollout.relative_output_errors.max():.3e}"
 )
 print(
-    "center error: "
-    f"mean={rollout.center_errors.mean():.3e}, "
-    f"max={rollout.center_errors.max():.3e}"
+    f"center error: mean={rollout.center_errors.mean():.3e}, max={rollout.center_errors.max():.3e}"
 )
 print(f"unique positions: {rollout.unique_positions}/{len(rollout.sequence)}")
 print(f"heading changes: {rollout.heading_changes}")
@@ -362,57 +337,89 @@ for ax, centers, title in (
     ax.set(title=title, aspect="equal", xticks=[], yticks=[])
     ax.set_frame_on(False)
 figure.colorbar(artist, ax=axes, fraction=0.03, label="time step")
-figure.suptitle(
-    "Pose tracking: exact group composition vs. joint signal decoding"
-)
+figure.suptitle("Pose tracking: exact group composition vs. joint signal decoding")
 plt.show()
 
 # %% [markdown]
-# ### Full-signal reconstruction snapshots
+# ### Rollout accuracy
 #
-# These panels do **not** decode position. Each one sums a signal on
-# $G=\mathbb{Z}_n^2\rtimes C_6$ over its six heading slices solely to display a
-# two-dimensional field. The top row is the exact regular-action target and the
-# bottom row is the network reconstruction. Their agreement tests reconstruction
-# of the full group signal. Under the right action, different heading slices can
-# have different spatial centers, so an individual spatial marginal can be
-# broad or multimodal and should not be interpreted as the agent's position.
+# Spatial and orientation accuracy are exact-match indicators for the jointly
+# decoded pose. Reconstruction accuracy is
+#
+# $$a_t=\max\left(0,\ 1-
+# \frac{\|\hat{x}_t-x_t\|_2}{\|x_t\|_2}\right).$$
+#
+# Each panel shows the per-step value faintly and its cumulative mean as a solid
+# line, so both transient failures and overall rollout performance remain visible.
 
 # %%
-snapshot_steps = rollout_config.snapshot_steps
-figure, axes = plt.subplots(
-    2,
-    len(snapshot_steps),
-    figsize=(3.4 * len(snapshot_steps), 6.2),
-    constrained_layout=True,
-    squeeze=False,
+spatial_accuracy = np.isclose(
+    rollout.center_errors,
+    0,
+    atol=1e-10,
+).astype(float)
+orientation_accuracy = np.isclose(
+    rollout.orientation_errors,
+    0,
+    atol=1e-10,
+).astype(float)
+reconstruction_accuracy = np.clip(
+    1 - rollout.relative_output_errors,
+    0,
+    1,
 )
-all_values = [
-    spatial_marginal(G, values[step])
-    for values in (rollout.true_outputs, rollout.predicted_outputs)
-    for step in snapshot_steps
-]
-vmin = min(float(values.min()) for values in all_values)
-vmax = max(float(values.max()) for values in all_values)
-for column, step in enumerate(snapshot_steps):
-    for row, (values, label) in enumerate(
-        (
-            (rollout.true_outputs, "exact target spatial marginal"),
-            (rollout.predicted_outputs, "reconstructed spatial marginal"),
-        )
-    ):
-        plot_lattice_scalar(
-            spatial_marginal(G, values[step]),
-            ax=axes[row, column],
-            title=f"{label}, step {step + 1}",
-            vmin=vmin,
-            vmax=vmax,
-            colorbar=False,
-            coordinate_mode="axial",
-        )
-figure.suptitle(
-    "Signal reconstruction after summing over heading "
-    "(not position-decoding plots)"
-)
-plt.show()
 
+figure, axes = plt.subplots(
+    1,
+    3,
+    figsize=(15, 4),
+    constrained_layout=True,
+    sharex=True,
+    sharey=True,
+)
+for ax, accuracy, title in zip(
+    axes,
+    (
+        spatial_accuracy,
+        orientation_accuracy,
+        reconstruction_accuracy,
+    ),
+    (
+        "Decoded spatial accuracy",
+        "Decoded orientation accuracy",
+        "Signal reconstruction accuracy",
+    ),
+):
+    cumulative_accuracy = np.cumsum(accuracy) / steps
+    ax.plot(
+        steps,
+        accuracy,
+        color="0.7",
+        linewidth=1,
+        marker=".",
+        markersize=4,
+        label="per step",
+    )
+    ax.plot(
+        steps,
+        cumulative_accuracy,
+        color="tab:blue",
+        linewidth=2.2,
+        label="cumulative mean",
+    )
+    ax.set(
+        title=f"{title}\nfinal cumulative={cumulative_accuracy[-1]:.2%}",
+        xlabel="time step",
+        ylim=(-0.05, 1.05),
+    )
+    ax.grid(alpha=0.2)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.legend(
+        loc="lower right",
+        frameon=False,
+        fontsize=8,
+    )
+axes[0].set_ylabel("accuracy")
+figure.suptitle("Decoded pose and full-signal reconstruction over the rollout")
+plt.show()

@@ -5,18 +5,8 @@
 # # Tuning analysis for the constructed $C_6$ RNN
 #
 # This notebook owns empirical trajectory tuning and both exhaustive theoretical
-# definitions: all-pairs and local-arrival tuning. It intentionally excludes
+# definitions: all drive and local drive tuning. It intentionally excludes
 # group-action pedagogy and neural-manifold analysis.
-#
-# ## Execution contract
-#
-# 1. Run **Build and select neurons** after changing the network or unit-selection
-#    settings. This usually takes seconds.
-# 2. Run **Compute or load empirical trajectory tuning** only when its cache key
-#    changes or when `recompute_tuning=True`.
-# 3. The exhaustive theoretical calculations use only the selected summary units
-#    and can be rerun independently.
-# 4. Plot edits never require occupancy recomputation.
 
 # %%
 import sys
@@ -32,9 +22,7 @@ if ipython is not None:
     ipython.run_line_magic("autoreload", "2")
 
 project_root = next(
-    parent
-    for parent in (Path.cwd(), *Path.cwd().parents)
-    if (parent / "src").is_dir()
+    parent for parent in (Path.cwd(), *Path.cwd().parents) if (parent / "src").is_dir()
 )
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
@@ -109,7 +97,6 @@ backward_left_or_right_probability = 0.005  # Each direction at ±120°.
 backward_probability = 0.01  # Move directly opposite the current heading.
 turn_probability = 0.12  # Each left or right 60° heading change.
 turn_persistence = 0.20  # Extra probability mass for repeating the previous turn.
-immediate_reversal_weight = 0.05  # Multiplier for immediate backtracking.
 wall_lookahead = 3  # Number of forward cells checked for an approaching wall.
 wall_avoidance_strength = 2.0  # Strength of steering away from nearby walls.
 minimum_wall_weight = 0.05  # Lowest pre-exponent weight for a wall-facing action.
@@ -117,7 +104,7 @@ minimum_wall_weight = 0.05  # Lowest pre-exponent weight for a wall-facing actio
 # ----------------------------
 # Primary trajectory used to select and summarize neurons
 # ----------------------------
-num_rollout_steps = 52  # Number of poses in the displayed trajectory.
+num_rollout_steps = 100  # Number of poses in the displayed trajectory.
 rollout_seed = 1  # Random seed for the displayed trajectory.
 rollout_margin = 1  # Excluded cells along each edge of the displayed arena.
 rollout_start_xy = (n_spatial // 2, n_spatial // 2)
@@ -127,7 +114,7 @@ snapshot_steps = (0, num_rollout_steps // 2, num_rollout_steps - 1)
 # ----------------------------
 # Occupancy-normalized trajectory tuning
 # ----------------------------
-num_tuning_trajectories = 100  # Independent trajectories pooled for tuning.
+num_tuning_trajectories = 300  # Independent trajectories pooled for tuning.
 steps_per_tuning_trajectory = 160  # Steps generated in each pooled trajectory.
 tuning_burn_in_steps = 10  # Initial steps omitted from each trajectory.
 tuning_seed = 101  # Base seed for the pooled trajectory collection.
@@ -139,7 +126,7 @@ cache_schema_version = 1  # Increment after changing cached artifact semantics.
 # ----------------------------
 # Neuron and module selection
 # ----------------------------
-num_summary_neurons = 6  # Irreps represented by their highest-variance unit.
+num_summary_neurons = 8  # Conjugate modules represented by one high-variance unit.
 num_tuning_irreps_to_plot = 5  # Highest-power retained modules to inspect.
 num_tuning_neurons_per_irrep = 10  # Units retained from each inspected module.
 include_conjugate_irreps = True  # Treat conjugate irreps as one real module.
@@ -151,9 +138,7 @@ exhaustive_drive_batch_size = 32  # Drives evaluated together in theoretical sum
 # ----------------------------
 use_tuning_cache = True  # Load and save matching trajectory-tuning artifacts.
 recompute_tuning = False  # Ignore a matching artifact and replace it.
-tuning_cache_directory = (
-    project_root / "artifacts" / "constructed_networks" / "discrete_se2_c6"
-)
+tuning_cache_directory = project_root / "artifacts" / "constructed_networks" / "discrete_se2_c6"
 
 # Package the explicit values above. No defaults are relied upon here.
 experiment_config = DiscreteSE2ExperimentConfig(
@@ -184,7 +169,6 @@ motion_config = NaturalisticMotionConfig(
     backward_probability=backward_probability,
     turn_probability=turn_probability,
     turn_persistence=turn_persistence,
-    reversal_weight=immediate_reversal_weight,
     wall_lookahead=wall_lookahead,
     wall_avoidance_strength=wall_avoidance_strength,
     minimum_wall_weight=minimum_wall_weight,
@@ -217,9 +201,7 @@ rollout = run_discrete_se2_rollout(
 G = experiment.group
 params = experiment.model
 
-static_hidden = (
-    params.probe_hidden_states(experiment.x_allo).detach().cpu().numpy()
-)
+static_hidden = params.probe_hidden_states(experiment.x_allo).detach().cpu().numpy()
 units_by_irrep = {}
 for unit, metadata in enumerate(params.metadata):
     units_by_irrep.setdefault(int(metadata["irrep_index"]), []).append(unit)
@@ -247,50 +229,82 @@ tuning_units_by_irrep = {
 }
 
 trajectory_variances = np.var(rollout.hidden_states, axis=0)
-best_unit_by_irrep = {
-    irrep_index: max(
-        units,
-        key=lambda unit: float(trajectory_variances[unit]),
-    )
-    for irrep_index, units in units_by_irrep.items()
-}
-ranked_irrep_representatives = sorted(
-    best_unit_by_irrep.items(),
+ranked_module_representatives = sorted(
+    [
+        (
+            module,
+            max(
+                module.unit_indices,
+                key=lambda unit: float(trajectory_variances[unit]),
+            ),
+        )
+        for module in module_orbits
+    ],
     key=lambda item: float(trajectory_variances[item[1]]),
     reverse=True,
 )
-summary_irrep_indices = np.asarray(
-    [
-        irrep_index
-        for irrep_index, _ in ranked_irrep_representatives[
-            :num_summary_neurons
-        ]
-    ],
-    dtype=int,
-)
+summary_modules = [module for module, _ in ranked_module_representatives[:num_summary_neurons]]
+summary_irrep_groups = [module.irrep_indices for module in summary_modules]
 summary_units = np.asarray(
-    [
-        unit
-        for _, unit in ranked_irrep_representatives[:num_summary_neurons]
-    ],
+    [unit for _, unit in ranked_module_representatives[:num_summary_neurons]],
     dtype=int,
 )
+
+
+def irrep_mode_label(irrep_indices):
+    """Describe whether an irrep module depends on position, heading, or both."""
+    irrep = params.all_irreps[irrep_indices[0]]
+    identity = np.eye(irrep.dim)
+    translation_dependent = any(
+        not np.allclose(
+            irrep(G.encode(x, y, 0)),
+            identity,
+            atol=1e-10,
+        )
+        for x in range(G.n)
+        for y in range(G.n)
+    )
+    orientation_dependent = any(
+        not np.allclose(
+            irrep(G.encode(0, 0, rotation)),
+            identity,
+            atol=1e-10,
+        )
+        for rotation in range(G.m)
+    )
+    if translation_dependent and orientation_dependent:
+        return "conjunctive"
+    if translation_dependent:
+        return "spatial-only"
+    if orientation_dependent:
+        return "orientation-only"
+    return "constant"
+
+
+summary_mode_labels = [irrep_mode_label(irrep_group) for irrep_group in summary_irrep_groups]
+summary_irrep_labels = [
+    (
+        f"irreps {'+'.join(map(str, irrep_group))}"
+        if len(irrep_group) > 1
+        else f"irrep {irrep_group[0]}"
+    )
+    for irrep_group in summary_irrep_groups
+]
 selected_units = np.asarray(
     sorted(
-        {
-            int(unit)
-            for units in tuning_units_by_irrep.values()
-            for unit in units
-        }
+        {int(unit) for units in tuning_units_by_irrep.values() for unit in units}
         | {int(unit) for unit in summary_units}
     ),
     dtype=int,
 )
 print(f"hidden width: {params.hidden_dim:,}")
-print(
-    "summary irrep/unit pairs:",
-    list(zip(summary_irrep_indices, summary_units)),
-)
+print("summary module representatives:")
+for irrep_label, mode_label, unit in zip(
+    summary_irrep_labels,
+    summary_mode_labels,
+    summary_units,
+):
+    print(f"  {irrep_label}: unit {unit} ({mode_label})")
 print("trajectory-tuning units:", selected_units)
 print("trajectory tuning configuration:", tuning_config)
 
@@ -310,20 +324,32 @@ static_figure, static_axes = plt.subplots(
     constrained_layout=True,
     squeeze=False,
 )
-for row, unit in enumerate(summary_units):
+for row, (irrep_label, mode_label, unit) in enumerate(
+    zip(
+        summary_irrep_labels,
+        summary_mode_labels,
+        summary_units,
+    )
+):
     tensor = static_hidden[:, unit].reshape(G.m, G.n, G.n)
+    unit_minimum = float(tensor.min())
+    unit_maximum = float(tensor.max())
     for rotation in range(G.m):
         plot_lattice_scalar(
             tensor[rotation],
             ax=static_axes[row, rotation],
             title=rf"$\theta={heading_degrees[rotation]:.0f}^\circ$",
+            vmin=unit_minimum,
+            vmax=unit_maximum,
             colorbar=False,
             coordinate_mode="axial",
         )
     plot_lattice_scalar(
         tensor.mean(axis=0),
         ax=static_axes[row, G.m],
-        title=f"unit {unit}: heading mean",
+        title=f"{irrep_label}\nunit {unit}\n{mode_label}\nheading mean",
+        vmin=unit_minimum,
+        vmax=unit_maximum,
         colorbar=False,
         coordinate_mode="axial",
     )
@@ -366,9 +392,10 @@ print(
 # %% [markdown]
 # ## 4. Matched trajectory, activity, and spatial tuning
 #
-# All four panels use the same representatives: the highest-variance neuron
-# within each of the six highest-variance irreps. Panels C and D compare
-# empirical trajectory tuning with exhaustive local-arrival tuning.
+# All five panels use the same representatives: the highest-variance neuron
+# within each of the eight highest-variance real modules, with complex-conjugate
+# irreps treated as one module. Panels C–E scale each nonconstant map independently
+# so its spatial structure remains visible.
 
 # %%
 summary_activity = rollout.hidden_states[:, summary_units]
@@ -380,51 +407,63 @@ normalized_activity = (summary_activity - activity_min) / np.where(
     1,
 )
 
-def normalize_tuning_map(tuning_map):
-    finite = np.isfinite(tuning_map)
-    normalized = np.full_like(tuning_map, np.nan)
-    if np.any(finite):
-        minimum = float(tuning_map[finite].min())
-        value_range = float(np.ptp(tuning_map[finite]))
-        normalized[finite] = (
-            (tuning_map[finite] - minimum) / value_range
-            if value_range > 0
-            else 0
-        )
-    return normalized
+
+def normalize_tuning_maps(definition_maps):
+    """Scale each nonconstant map independently without amplifying roundoff."""
+    values = np.asarray(definition_maps, dtype=float)
+    minimum = np.nanmin(values, axis=(1, 2), keepdims=True)
+    maximum = np.nanmax(values, axis=(1, 2), keepdims=True)
+    span = maximum - minimum
+    scale = np.maximum(np.abs(minimum), np.abs(maximum))
+    tolerance = 1e-12 + 1e-10 * scale
+    stable_span = np.where(span > tolerance, span, 1)
+    normalized = (values - minimum) / stable_span
+    normalized = np.where(span > tolerance, normalized, 0.5)
+    return normalized, tolerance
 
 
-empirical_summary_maps = [
-    normalize_tuning_map(
-        empirical_tuning.position_tuning[
-            ..., empirical_tuning.local_unit_index(int(unit))
-        ]
-    )
-    for unit in summary_units
-]
-local_arrival = compute_local_arrival_tuning(
+empirical_summary_maps = np.stack(
+    [
+        empirical_tuning.position_tuning[..., empirical_tuning.local_unit_index(int(unit))]
+        for unit in summary_units
+    ],
+    axis=-1,
+)
+local_drive_tuning = compute_local_arrival_tuning(
     experiment,
     summary_units,
     drive_batch_size=exhaustive_drive_batch_size,
 )
-local_arrival_summary_maps = [
-    normalize_tuning_map(local_arrival.position_mean[..., column])
-    for column in range(len(summary_units))
-]
+all_drive_tuning = compute_all_pairs_tuning(
+    experiment,
+    summary_units,
+    drive_batch_size=exhaustive_drive_batch_size,
+)
+summary_definition_maps = np.stack(
+    [
+        empirical_summary_maps,
+        local_drive_tuning.position_mean,
+        all_drive_tuning.position_mean,
+    ],
+    axis=0,
+)
+normalized_summary_maps, _ = normalize_tuning_maps(summary_definition_maps)
 
-summary_figure = plt.figure(figsize=(23, 6), layout="constrained")
+summary_figure = plt.figure(
+    figsize=(29, max(6, 1.15 * len(summary_units))),
+    layout="constrained",
+)
 (
     trajectory_subfigure,
     activity_subfigure,
     empirical_subfigure,
-    local_arrival_subfigure,
-) = (
-    summary_figure.subfigures(
-        1,
-        4,
-        width_ratios=(1.0, 1.0, 1.6, 1.6),
-        wspace=0.04,
-    )
+    local_drive_subfigure,
+    all_drive_subfigure,
+) = summary_figure.subfigures(
+    1,
+    5,
+    width_ratios=(1.0, 1.0, 1.6, 1.6, 1.6),
+    wspace=0.04,
 )
 
 trajectory_ax = trajectory_subfigure.subplots()
@@ -470,8 +509,13 @@ activity_axes = np.asarray(
         squeeze=False,
     )
 ).ravel()
-for column, (ax, irrep_index, unit) in enumerate(
-    zip(activity_axes, summary_irrep_indices, summary_units)
+for column, (ax, irrep_label, mode_label, unit) in enumerate(
+    zip(
+        activity_axes,
+        summary_irrep_labels,
+        summary_mode_labels,
+        summary_units,
+    )
 ):
     ax.plot(
         activity_steps,
@@ -480,7 +524,7 @@ for column, (ax, irrep_index, unit) in enumerate(
         linewidth=1.6,
     )
     ax.set(
-        ylabel=f"irrep {irrep_index}\nunit {unit}",
+        ylabel=f"{irrep_label}\nunit {unit}\n{mode_label}",
         ylim=(-0.03, 1.03),
         yticks=(0, 1),
     )
@@ -491,31 +535,35 @@ activity_axes[-1].set_xlabel("time step")
 
 columns = 2
 rows = int(np.ceil(len(summary_units) / columns))
-for subfigure, tuning_maps, title in (
+for definition_index, (subfigure, title) in enumerate(
     (
-        empirical_subfigure,
-        empirical_summary_maps,
-        "C. Empirical trajectory tuning",
-    ),
-    (
-        local_arrival_subfigure,
-        local_arrival_summary_maps,
-        "D. Exhaustive local-arrival tuning",
-    ),
-):
-    tuning_axes = np.asarray(
-        subfigure.subplots(rows, columns, squeeze=False)
+        (
+            empirical_subfigure,
+            "C. Empirical trajectory tuning",
+        ),
+        (
+            local_drive_subfigure,
+            "D. Exhaustive local drive tuning",
+        ),
+        (
+            all_drive_subfigure,
+            "E. Exhaustive all drive tuning",
+        ),
     )
-    for ax, irrep_index, unit, tuning_map in zip(
-        tuning_axes.ravel(),
-        summary_irrep_indices,
-        summary_units,
-        tuning_maps,
+):
+    tuning_axes = np.asarray(subfigure.subplots(rows, columns, squeeze=False))
+    for column, (ax, irrep_label, mode_label, unit) in enumerate(
+        zip(
+            tuning_axes.ravel(),
+            summary_irrep_labels,
+            summary_mode_labels,
+            summary_units,
+        )
     ):
         plot_lattice_scalar(
-            tuning_map,
+            normalized_summary_maps[definition_index, ..., column],
             ax=ax,
-            title=f"irrep {irrep_index}, unit {unit}",
+            title=f"{irrep_label}\nunit {unit}\n{mode_label}",
             cmap="viridis",
             vmin=0,
             vmax=1,
@@ -533,36 +581,29 @@ plt.show()
 #
 # For every target pose $g$ and drive $j$, both theoretical definitions solve
 # $i * j = g$ for the unique predecessor $i$, evaluate the one-step response
-# $h(i,j)$, and average over incoming transitions. **All pairs** uses every
-# $j\in G$; **local arrivals** uses the uniform 21-element local drive set.
+# $h(i,j)$, and average over incoming transitions. **All drive** uses every
+# $j\in G$; **local drive** uses the uniform 21-element local drive set.
 #
-# The figure compares spatial marginals after independently scaling each map to
-# $[0,1]$. The printed correlations use the full pose tuning curves on $G$,
-# including heading, and retain the empirical occupancy mask.
-
-# %%
-all_pairs_tuning = compute_all_pairs_tuning(
-    experiment,
-    summary_units,
-    drive_batch_size=exhaustive_drive_batch_size,
-)
+# The figure scales each nonconstant spatial marginal independently to preserve
+# visible structure. A tolerance keeps genuinely invariant maps uniform instead
+# of stretching floating-point noise across the colormap. The printed
+# correlations use the full pose tuning curves on $G$, including heading, and
+# retain the empirical occupancy mask.
 
 empirical_pose_tuning = np.stack(
     [
-        empirical_tuning.pose_tuning[
-            ..., empirical_tuning.local_unit_index(int(unit))
-        ]
+        empirical_tuning.pose_tuning[..., empirical_tuning.local_unit_index(int(unit))]
         for unit in summary_units
     ],
     axis=-1,
 )
-all_pairs_pose_tuning = all_pairs_tuning.pose_mean.reshape(
+all_drive_pose_tuning = all_drive_tuning.pose_mean.reshape(
     G.m,
     G.n,
     G.n,
     len(summary_units),
 )
-local_arrival_pose_tuning = local_arrival.pose_mean.reshape(
+local_drive_pose_tuning = local_drive_tuning.pose_mean.reshape(
     G.m,
     G.n,
     G.n,
@@ -571,15 +612,15 @@ local_arrival_pose_tuning = local_arrival.pose_mean.reshape(
 
 position_tuning_definitions = (
     ("Empirical trajectories", np.nanmean(empirical_pose_tuning, axis=0)),
-    ("Exhaustive all pairs", all_pairs_tuning.position_mean),
-    ("Exhaustive local arrivals", local_arrival.position_mean),
+    ("Exhaustive local drive", local_drive_tuning.position_mean),
+    ("Exhaustive all drive", all_drive_tuning.position_mean),
 )
 
-
-def normalize_maps(values):
-    minimum = np.nanmin(values, axis=(0, 1), keepdims=True)
-    span = np.nanmax(values, axis=(0, 1), keepdims=True) - minimum
-    return (values - minimum) / np.where(span > 0, span, 1)
+tuning_definition_maps = np.stack(
+    [maps for _, maps in position_tuning_definitions],
+    axis=0,
+)
+normalized_tuning_maps, _ = normalize_tuning_maps(tuning_definition_maps)
 
 
 def masked_correlation(first, second):
@@ -601,18 +642,17 @@ comparison_figure, comparison_axes = plt.subplots(
     squeeze=False,
 )
 for row, (definition, maps) in enumerate(position_tuning_definitions):
-    normalized_maps = normalize_maps(maps)
-    for column, (irrep_index, unit) in enumerate(
-        zip(summary_irrep_indices, summary_units)
+    for column, (irrep_label, mode_label, unit) in enumerate(
+        zip(
+            summary_irrep_labels,
+            summary_mode_labels,
+            summary_units,
+        )
     ):
         plot_lattice_scalar(
-            normalized_maps[..., column],
+            normalized_tuning_maps[row, ..., column],
             ax=comparison_axes[row, column],
-            title=(
-                f"irrep {irrep_index}, unit {unit}"
-                if row == 0
-                else None
-            ),
+            title=(f"{irrep_label}\nunit {unit}\n{mode_label}" if row == 0 else None),
             cmap="viridis",
             vmin=0,
             vmax=1,
@@ -627,27 +667,31 @@ for row, (definition, maps) in enumerate(position_tuning_definitions):
         ha="right",
         va="center",
     )
-comparison_figure.suptitle(
-    "Spatial tuning under three definitions (independently normalized)"
-)
+comparison_figure.suptitle("Spatial tuning under three definitions (stable per-map normalization)")
 plt.show()
 
 print(
-    f"all pairs: {all_pairs_tuning.num_drives} drives per target; "
-    f"local arrivals: {local_arrival.num_drives} drives per target"
+    f"all drive: {all_drive_tuning.num_drives} drives per target; "
+    f"local drive: {local_drive_tuning.num_drives} drives per target"
 )
-for column, unit in enumerate(summary_units):
+for column, (irrep_label, mode_label, unit) in enumerate(
+    zip(
+        summary_irrep_labels,
+        summary_mode_labels,
+        summary_units,
+    )
+):
     empirical = empirical_pose_tuning[..., column]
-    all_pairs = all_pairs_pose_tuning[..., column]
-    local = local_arrival_pose_tuning[..., column]
+    all_drive = all_drive_pose_tuning[..., column]
+    local_drive = local_drive_pose_tuning[..., column]
     print(
-        f"unit {unit}: "
-        f"corr(empirical, all pairs)="
-        f"{masked_correlation(empirical, all_pairs):.3f}, "
-        f"corr(empirical, local)="
-        f"{masked_correlation(empirical, local):.3f}, "
-        f"corr(all pairs, local)="
-        f"{masked_correlation(all_pairs, local):.3f}"
+        f"{irrep_label}, unit {unit} ({mode_label}): "
+        f"corr(empirical, all drive)="
+        f"{masked_correlation(empirical, all_drive):.3f}, "
+        f"corr(empirical, local drive)="
+        f"{masked_correlation(empirical, local_drive):.3f}, "
+        f"corr(all drive, local drive)="
+        f"{masked_correlation(all_drive, local_drive):.3f}"
     )
 
 # %% [markdown]
@@ -686,7 +730,13 @@ autocorrelation_figure, autocorrelation_axes = plt.subplots(
     constrained_layout=True,
     squeeze=False,
 )
-for column, unit in enumerate(summary_units):
+for column, (irrep_label, mode_label, unit) in enumerate(
+    zip(
+        summary_irrep_labels,
+        summary_mode_labels,
+        summary_units,
+    )
+):
     local_index = empirical_tuning.local_unit_index(int(unit))
     autocorrelation = masked_periodic_spatial_autocorrelation(
         empirical_tuning.position_tuning[..., local_index]
@@ -694,7 +744,7 @@ for column, unit in enumerate(summary_units):
     plot_lattice_scalar(
         autocorrelation,
         ax=autocorrelation_axes[0, column],
-        title=f"unit {unit}",
+        title=f"{irrep_label}\nunit {unit}\n{mode_label}",
         cmap="viridis",
         vmin=-1,
         vmax=1,
@@ -707,6 +757,6 @@ plt.show()
 # %% [markdown]
 # ## Summary
 #
-# Empirical trajectory, exhaustive all-pairs, and exhaustive local-arrival tuning
+# Empirical trajectory, exhaustive all drive, and exhaustive local drive tuning
 # now have separate result objects and a matched comparison. The empirical cache
 # remains valid across all plotting edits.
