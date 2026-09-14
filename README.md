@@ -119,7 +119,7 @@ In Cursor or Jupyter, select **Python (group-agf)**.
 
 ## Notebooks
 
-Notebooks are divided into trained and analytically constructed networks. See [`notebooks/README.md`](notebooks/README.md) for detailed descriptions and results.
+Notebooks are divided into trained and analytically constructed networks. See [`notebooks/README.md`](notebooks/README.md) for a short navigation note.
 
 ### Trained networks
 
@@ -227,7 +227,7 @@ grids-and-groups/
 ├── notebooks/
 │   ├── trained_networks/          # Networks learned by gradient descent
 │   ├── constructed_networks/      # Closed-form representation-theoretic RNNs
-│   └── README.md                  # Notebook guide and experimental results
+│   └── README.md                  # Brief notebook navigation note
 ├── src/
 │   ├── groups/                    # Finite groups and irreducible representations
 │   ├── configs/                   # Training configurations
