@@ -163,3 +163,30 @@ def lattice_path_coordinates(
     return np.column_stack(
         (x[wrapped[:, 0], wrapped[:, 1]], y[wrapped[:, 0], wrapped[:, 1]])
     )
+
+
+def lattice_path_segments(
+    points: np.ndarray,
+    n: int,
+    *,
+    mode: str = "offset",
+    maximum_step_length: float = 1.5,
+) -> list[np.ndarray]:
+    """Map a lattice path to display coordinates and split it at chart seams.
+
+    The wrapped ``offset`` display cuts the slanted triangular-lattice
+    fundamental domain and translates one piece to the opposite side.  Local
+    lattice neighbors can therefore appear far apart across the display seam.
+    Splitting at those jumps prevents plotting a spurious line across the
+    rectangular chart while leaving the underlying periodic path unchanged.
+    """
+    if not np.isfinite(maximum_step_length) or maximum_step_length <= 0:
+        raise ValueError("maximum_step_length must be finite and positive")
+    coordinates = lattice_path_coordinates(points, n, mode=mode)
+    if len(coordinates) < 2:
+        return [coordinates]
+    seam_crossings = np.flatnonzero(
+        np.linalg.norm(np.diff(coordinates, axis=0), axis=1)
+        > maximum_step_length
+    ) + 1
+    return [segment for segment in np.split(coordinates, seam_crossings) if len(segment)]

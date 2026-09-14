@@ -3,7 +3,26 @@
 import numpy as np
 import pytest
 
-from src.geometry.discrete_se2 import periodic_spatial_autocorrelation
+from src.geometry.discrete_se2 import (
+    lattice_path_segments,
+    periodic_spatial_autocorrelation,
+)
+
+
+def test_lattice_path_segments_splits_wrapped_offset_seam():
+    points = np.asarray([(7, 2), (8, 2), (9, 2), (0, 2), (1, 2)])
+
+    segments = lattice_path_segments(points, 10, mode="offset")
+
+    assert [len(segment) for segment in segments] == [2, 3]
+    for segment in segments:
+        if len(segment) > 1:
+            assert np.all(np.linalg.norm(np.diff(segment, axis=0), axis=1) <= 1.5)
+
+
+def test_lattice_path_segments_validates_step_length():
+    with pytest.raises(ValueError, match="finite and positive"):
+        lattice_path_segments(np.asarray([(0, 0)]), 5, maximum_step_length=0)
 
 
 def test_periodic_spatial_autocorrelation_is_translation_invariant():

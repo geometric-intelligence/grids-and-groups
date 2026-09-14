@@ -27,8 +27,14 @@ def plot_lattice_scalar(
     vmax: float | None = None,
     colorbar: bool = True,
     coordinate_mode: str = "offset",
+    wrap_periodic_edges: bool = False,
 ):
-    """Plot a scalar field as a tightly packed triangular lattice of hexagons."""
+    """Plot a scalar field as a tightly packed triangular lattice of hexagons.
+
+    When ``wrap_periodic_edges`` is true, the offset chart is clipped to one
+    rectangular period. Hexagons crossing a boundary are duplicated across the
+    opposite boundary, so the clipped pieces form one periodic cell.
+    """
     values = np.asarray(values)
     if values.ndim != 2 or values.shape[0] != values.shape[1]:
         raise ValueError(f"values must be a square two-dimensional array, got {values.shape}")
@@ -41,6 +47,50 @@ def plot_lattice_scalar(
     )
     radius = 1 / np.sqrt(3)
     corner_angles = np.pi / 6 + np.arange(6) * np.pi / 3
+    if wrap_periodic_edges and coordinate_mode != "offset":
+        raise ValueError("wrap_periodic_edges requires coordinate_mode='offset'")
+
+    centers_and_values = []
+    horizontal_radius = radius * np.cos(np.pi / 6)
+    edge_tolerance = 1e-12
+
+    def append_center_and_horizontal_images(center_x, center_y, value):
+        centers_and_values.append((center_x, center_y, value))
+        if center_x - horizontal_radius < -edge_tolerance:
+            centers_and_values.append((center_x + values.shape[0], center_y, value))
+        if (
+            center_x + horizontal_radius
+            > values.shape[0] + edge_tolerance
+        ):
+            centers_and_values.append((center_x - values.shape[0], center_y, value))
+
+    if wrap_periodic_edges:
+        for center_x, center_y, value in zip(x.ravel(), y.ravel(), values.ravel()):
+            append_center_and_horizontal_images(center_x, center_y, value)
+
+        # A horizontal cut through a pointy-hexagon tiling intersects cells in
+        # the adjacent lattice row. Add periodic copies of the last row below
+        # the chart and the first row above it. Re-evaluating the offset map at
+        # y=-1 and y=n supplies the horizontal shift required by the torus seam.
+        row_spacing = np.sqrt(3) / 2
+        n = values.shape[0]
+        for extended_second, source_second in ((-1, n - 1), (n, 0)):
+            for first in range(n):
+                center_x = (
+                    (first + extended_second // 2) % n
+                    + 0.5 * (extended_second % 2)
+                )
+                center_y = row_spacing * extended_second
+                append_center_and_horizontal_images(
+                    center_x,
+                    center_y,
+                    values[first, source_second],
+                )
+    else:
+        centers_and_values.extend(
+            zip(x.ravel(), y.ravel(), values.ravel())
+        )
+
     patches = [
         Polygon(
             np.column_stack(
@@ -51,19 +101,27 @@ def plot_lattice_scalar(
             ),
             closed=True,
         )
-        for center_x, center_y in zip(x.ravel(), y.ravel())
+        for center_x, center_y, _ in centers_and_values
     ]
     artist = PatchCollection(
         patches,
-        array=values.ravel(),
+        array=np.asarray([value for _, _, value in centers_and_values]),
         cmap=cmap,
         norm=norm,
         edgecolor=(0.15, 0.15, 0.15, 0.35),
         linewidth=0.25,
     )
     ax.add_collection(artist)
-    ax.set_xlim(float(x.min()) - radius, float(x.max()) + radius)
-    ax.set_ylim(float(y.min()) - radius, float(y.max()) + radius)
+    if wrap_periodic_edges:
+        row_spacing = np.sqrt(3) / 2
+        ax.set_xlim(0, values.shape[0])
+        ax.set_ylim(
+            -row_spacing / 2,
+            (values.shape[0] - 0.5) * row_spacing,
+        )
+    else:
+        ax.set_xlim(float(x.min()) - radius, float(x.max()) + radius)
+        ax.set_ylim(float(y.min()) - radius, float(y.max()) + radius)
     ax.set_aspect("equal")
     ax.set_axis_off()
     if title is not None:

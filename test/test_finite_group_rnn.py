@@ -375,6 +375,39 @@ def test_naturalistic_sequence_requires_c6_and_normalized_probabilities():
         make_naturalistic_motion_sequence(group)
 
 
+def test_naturalistic_sequence_can_wrap_periodic_boundaries():
+    group = DiscreteSE2Group(n=5, m=6)
+    initial_pose = (4, 0, 0)
+    config = NaturalisticMotionConfig(
+        stay_probability=0,
+        forward_probability=1,
+        forward_left_or_right_probability=0,
+        backward_left_or_right_probability=0,
+        backward_probability=0,
+        turn_probability=0,
+        turn_persistence=0,
+        wall_lookahead=1,
+        wall_avoidance_strength=0,
+        minimum_wall_weight=1,
+        periodic_boundaries=True,
+    )
+    sequence = make_naturalistic_motion_sequence(
+        group,
+        steps=2,
+        seed=0,
+        start_xy=initial_pose[:2],
+        initial_pose=initial_pose,
+        margin=0,
+        action_side="right",
+        config=config,
+    )
+
+    pose = group.encode(*initial_pose)
+    for element in sequence:
+        pose = group.compose(pose, int(element))
+    assert group.decode(pose) == (0, 0, 0)
+
+
 def test_constructed_rnn_uses_body_frame_right_action():
     group = DiscreteSE2Group(n=5, m=4)
     current_pose = group.encode(2, 2, 1)

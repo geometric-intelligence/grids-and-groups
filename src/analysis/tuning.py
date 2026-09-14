@@ -498,6 +498,24 @@ def compute_all_pairs_tuning(
     )
 
 
+def compute_arrival_tuning(
+    experiment: DiscreteSE2Experiment,
+    unit_indices,
+    drive_elements,
+    *,
+    drive_scope: str = "specified arrivals",
+    drive_batch_size: int = 32,
+) -> ExhaustiveArrivalTuningResult:
+    """Average one-step responses over an explicitly supplied drive set."""
+    return _compute_exhaustive_arrival_tuning(
+        experiment,
+        unit_indices,
+        drive_elements,
+        drive_scope=drive_scope,
+        drive_batch_size=drive_batch_size,
+    )
+
+
 def compute_local_arrival_tuning(
     experiment: DiscreteSE2Experiment,
     unit_indices,

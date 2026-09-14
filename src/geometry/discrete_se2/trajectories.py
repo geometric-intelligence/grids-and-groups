@@ -29,6 +29,7 @@ class NaturalisticMotionConfig:
     wall_lookahead: int = 3
     wall_avoidance_strength: float = 2.0
     minimum_wall_weight: float = 0.05
+    periodic_boundaries: bool = False
 
     def __post_init__(self) -> None:
         probabilities = {
@@ -65,6 +66,8 @@ class NaturalisticMotionConfig:
             raise ValueError("wall_lookahead must be an integer greater than 0")
         if not np.isfinite(self.wall_avoidance_strength) or self.wall_avoidance_strength < 0:
             raise ValueError("wall_avoidance_strength must be finite and nonnegative")
+        if not isinstance(self.periodic_boundaries, (bool, np.bool_)):
+            raise ValueError("periodic_boundaries must be a boolean")
 
 
 def make_naturalistic_motion_sequence(
@@ -111,6 +114,8 @@ def make_naturalistic_motion_sequence(
         raise ValueError("margin must be a nonnegative integer")
     if margin < 0 or 2 * margin >= n:
         raise ValueError(f"margin must satisfy 0 <= 2 * margin < {n}")
+    if config.periodic_boundaries and margin != 0:
+        raise ValueError("periodic boundaries require margin=0")
 
     rng = np.random.default_rng(seed)
     if start_xy is None:
@@ -191,16 +196,21 @@ def make_naturalistic_motion_sequence(
                 dy_world = int(dy_world if dy_world <= n // 2 else dy_world - n)
                 x_next = x + dx_world
                 y_next = y + dy_world
-                if not inside_bounds(x_next, y_next):
-                    continue
-
-                clearance_fraction = (
-                    forward_clearance(x_next, y_next, next_heading) / config.wall_lookahead
-                )
-                wall_weight = (
-                    config.minimum_wall_weight
-                    + (1 - config.minimum_wall_weight) * clearance_fraction
-                ) ** config.wall_avoidance_strength
+                if config.periodic_boundaries:
+                    x_next %= n
+                    y_next %= n
+                    wall_weight = 1.0
+                else:
+                    if not inside_bounds(x_next, y_next):
+                        continue
+                    clearance_fraction = (
+                        forward_clearance(x_next, y_next, next_heading)
+                        / config.wall_lookahead
+                    )
+                    wall_weight = (
+                        config.minimum_wall_weight
+                        + (1 - config.minimum_wall_weight) * clearance_fraction
+                    ) ** config.wall_avoidance_strength
                 weight = (
                     turn_weights[turn_index] * translation_weights[translation_index] * wall_weight
                 )
