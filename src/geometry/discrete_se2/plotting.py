@@ -2,19 +2,11 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
-import plotly.graph_objects as go
-import plotly.io as pio
 from matplotlib import colors as mcolors
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Polygon
-from plotly.subplots import make_subplots
 
-from .core import (
-    align_rotation_slices,
-    lattice_coordinates,
-    lattice_path_coordinates,
-    signal_to_tensor,
-)
+from .core import lattice_coordinates, lattice_path_coordinates, signal_to_tensor
 
 
 def plot_lattice_scalar(
@@ -129,55 +121,6 @@ def plot_lattice_scalar(
     if colorbar:
         ax.figure.colorbar(artist, ax=ax, fraction=0.046, pad=0.04)
     return ax
-
-
-def plot_group_signal(
-    group,
-    signal: np.ndarray,
-    *,
-    title: str | None = None,
-    align_rotations: bool = False,
-    reduction: str | None = None,
-    cmap: str = "viridis",
-    coordinate_mode: str = "offset",
-):
-    """Plot rotation slices or one rotation-reduced spatial field."""
-    tensor = signal_to_tensor(group, signal)
-    if align_rotations:
-        tensor = align_rotation_slices(group, tensor)
-    if reduction is not None:
-        if reduction == "sum":
-            values = tensor.sum(axis=0)
-        elif reduction == "mean":
-            values = tensor.mean(axis=0)
-        else:
-            raise ValueError("reduction must be None, 'sum', or 'mean'")
-        return plot_lattice_scalar(
-            values,
-            title=title,
-            cmap=cmap,
-            coordinate_mode=coordinate_mode,
-        )
-
-    figure, axes = plt.subplots(
-        1, group.m, figsize=(4.5 * group.m, 4), constrained_layout=True
-    )
-    axes = np.atleast_1d(axes)
-    vmin, vmax = float(tensor.min()), float(tensor.max())
-    for rotation, ax in enumerate(axes):
-        plot_lattice_scalar(
-            tensor[rotation],
-            ax=ax,
-            title=f"rotation {rotation}",
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-            colorbar=rotation == group.m - 1,
-            coordinate_mode=coordinate_mode,
-        )
-    if title:
-        figure.suptitle(title)
-    return axes
 
 
 def plot_lattice_trajectory(
@@ -350,6 +293,8 @@ def plotly_heading_stacks(
     height: int = 650,
 ):
     """Build interactive WebGL heading stacks in a row or column."""
+    from plotly.subplots import make_subplots
+
     signals = [np.asarray(signal) for signal in signals]
     titles = list(titles)
     if len(signals) != len(titles):
@@ -467,6 +412,8 @@ def plotly_heading_stacks(
 
 def linked_plotly_html(figure, scene_pairs=()) -> str:
     """Render a Plotly figure as HTML with bidirectionally linked cameras."""
+    import plotly.io as pio
+
     pairs_json = repr([list(pair) for pair in scene_pairs]).replace("'", '"')
     camera_sync_script = f"""
 const plot = document.getElementById('{{plot_id}}');
@@ -530,6 +477,8 @@ def _add_plotly_heading_stack(
     coordinate_mode,
     layer_spacing,
 ):
+    import plotly.graph_objects as go
+
     tensor = signal_to_tensor(group, signal)
     lattice_x, lattice_y = lattice_coordinates(group.n, mode=coordinate_mode)
     highlighted_poses = {group.decode(element) for element in highlighted_elements}

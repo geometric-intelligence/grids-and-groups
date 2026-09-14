@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from src.geometry.discrete_se2 import (
+from src.geometry.discrete_se2.core import (
     lattice_path_segments,
     periodic_spatial_autocorrelation,
 )

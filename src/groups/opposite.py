@@ -125,8 +125,6 @@ class OppositeGroup:
             raise ValueError(f"signal final axis must have length {self.order}, got {signal.shape}")
         return np.take(signal, self.action_permutation(g), axis=-1)
 
-    right_action = left_action
-
     def regular_rep(self) -> np.ndarray:
         """Return right-regular matrices for the original group."""
         required_bytes = self.order**3 * np.dtype(np.float32).itemsize

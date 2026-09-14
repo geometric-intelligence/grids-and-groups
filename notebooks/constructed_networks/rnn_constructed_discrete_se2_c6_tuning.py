@@ -4,13 +4,12 @@
 # %% [markdown]
 # # Tuning analysis for the constructed $C_6$ RNN
 #
-# This notebook owns empirical trajectory tuning and both exhaustive theoretical
+# This notebook owns empirical trajectory tuning and both exact one-step
 # definitions: all drive and local drive tuning. It intentionally excludes
 # group-action pedagogy and neural-manifold analysis.
 
 # %%
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -31,13 +30,10 @@ project_root = next(
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from src.analysis import (  # noqa: E402
-    TrajectoryTuningConfig,
-    compute_all_pairs_tuning,
-    compute_arrival_tuning,
-    compute_local_arrival_tuning,
-    load_or_compute_empirical_trajectory_tuning,
-    masked_periodic_spatial_autocorrelation,
+from src.analysis.tuning import (  # noqa: E402
+    compute_empirical_trajectory_tuning,
+    compute_one_step_tuning,
+    occupancy_normalized_activity,
 )
 from src.experiments.discrete_se2 import (  # noqa: E402
     DiscreteSE2ExperimentConfig,
@@ -45,13 +41,10 @@ from src.experiments.discrete_se2 import (  # noqa: E402
     build_discrete_se2_experiment,
     run_discrete_se2_rollout,
 )
-from src.geometry.discrete_se2 import (  # noqa: E402
-    NaturalisticMotionConfig,
-    lattice_coordinates,
-    lattice_path_coordinates,
-    plot_lattice_scalar,
-)
-from src.groups import DiscreteSE2Group  # noqa: E402
+from src.geometry.discrete_se2.core import lattice_coordinates, lattice_path_coordinates  # noqa: E402
+from src.geometry.discrete_se2.plotting import plot_lattice_scalar  # noqa: E402
+from src.geometry.discrete_se2.trajectories import NaturalisticMotionConfig  # noqa: E402
+from src.groups.znxzn_cm import DiscreteSE2Group  # noqa: E402
 from src.neural_manifold import build_module_orbits  # noqa: E402
 
 # %% [markdown]
@@ -127,7 +120,6 @@ tuning_seed = 101  # Base seed for the pooled trajectory collection.
 minimum_bin_occupancy = 5  # Samples required to retain a pose or position bin.
 tuning_margin = 0  # Excluded cells along each tuning-trajectory arena edge.
 tuning_batch_size = 4  # Trajectories evaluated together per recurrent batch.
-cache_schema_version = 1  # Increment after changing cached artifact semantics.
 
 # ----------------------------
 # Panel A periodic random walk
@@ -148,14 +140,7 @@ num_tuning_irreps_to_plot = 5  # Highest-power retained modules to inspect.
 num_tuning_neurons_per_irrep = 10  # Units retained from each inspected module.
 include_conjugate_irreps = True  # Treat conjugate irreps as one real module.
 skip_trivial_irrep = True  # Exclude the spatially constant module.
-exhaustive_drive_batch_size = 32  # Drives evaluated together in theoretical sums.
-
-# ----------------------------
-# Cache controls
-# ----------------------------
-use_tuning_cache = True  # Load and save matching trajectory-tuning artifacts.
-recompute_tuning = False  # Ignore a matching artifact and replace it.
-tuning_cache_directory = project_root / "artifacts" / "constructed_networks" / "discrete_se2_c6"
+one_step_drive_batch_size = 32  # Drives evaluated together in exact one-step sums.
 
 # Package the explicit values above. No defaults are relied upon here.
 experiment_config = DiscreteSE2ExperimentConfig(
@@ -212,17 +197,6 @@ rollout_config = DiscreteSE2RolloutConfig(
     arrow_stride=orientation_arrow_stride,
     snapshot_steps=snapshot_steps,
 )
-tuning_config = TrajectoryTuningConfig(
-    num_trajectories=num_tuning_trajectories,
-    steps_per_trajectory=steps_per_tuning_trajectory,
-    burn_in_steps=tuning_burn_in_steps,
-    seed=tuning_seed,
-    min_occupancy=minimum_bin_occupancy,
-    margin=tuning_margin,
-    batch_size=tuning_batch_size,
-    cache_schema_version=cache_schema_version,
-)
-
 experiment = build_discrete_se2_experiment(experiment_config)
 rollout = run_discrete_se2_rollout(
     experiment,
@@ -347,7 +321,6 @@ for irrep_label, mode_label, unit in zip(
 ):
     print(f"  {irrep_label}: unit {unit} ({mode_label})")
 print("trajectory-tuning units:", selected_units)
-print("trajectory tuning configuration:", tuning_config)
 
 # %% [markdown]
 # ## 2. Static initialization tuning
@@ -404,29 +377,40 @@ static_figure.suptitle("Static initialization responses")
 plt.show()
 
 # %% [markdown]
-# ## 3. Compute or load empirical trajectory tuning
+# ## 3. Compute empirical trajectory tuning
 #
 # This is the only five-minute-class stage. It runs batched recurrent
 # trajectories, records only `selected_units`, and accumulates sufficient
-# statistics online. The cache key includes the complete experiment, motion,
-# tuning, selected-unit, and schema configurations.
-#
-# Set `recompute_tuning=True` only to deliberately replace the matching artifact.
+# statistics online.
 
 # %%
-empirical_tuning = load_or_compute_empirical_trajectory_tuning(
+empirical_tuning = compute_empirical_trajectory_tuning(
     experiment,
     selected_units,
     motion_config=motion_config,
-    tuning_config=tuning_config,
-    cache_directory=tuning_cache_directory,
-    recompute=recompute_tuning,
-    use_cache=use_tuning_cache,
+    num_trajectories=num_tuning_trajectories,
+    steps_per_trajectory=steps_per_tuning_trajectory,
+    burn_in_steps=tuning_burn_in_steps,
+    seed=tuning_seed,
+    margin=tuning_margin,
+    batch_size=tuning_batch_size,
 )
-status = "loaded" if empirical_tuning.cache_hit else "computed"
-print(f"empirical trajectory tuning: {status}")
-print(f"cache key: {empirical_tuning.cache_key}")
-print(f"cache path: {empirical_tuning.cache_path}")
+empirical_column = {
+    int(unit): column
+    for column, unit in enumerate(empirical_tuning.unit_indices)
+}
+empirical_pose_tuning = occupancy_normalized_activity(
+    empirical_tuning.pose_activity_sums,
+    empirical_tuning.pose_occupancy,
+    min_occupancy=minimum_bin_occupancy,
+)
+empirical_position_tuning = occupancy_normalized_activity(
+    empirical_tuning.pose_activity_sums.sum(axis=0),
+    empirical_tuning.pose_occupancy.sum(axis=0),
+    min_occupancy=minimum_bin_occupancy,
+)
+empirical_position_occupancy = empirical_tuning.pose_occupancy.sum(axis=0)
+print("empirical trajectory tuning: computed")
 print(f"selected units: {len(empirical_tuning.unit_indices)}")
 print(f"retained samples: {empirical_tuning.pose_occupancy.sum():,}")
 print(
@@ -471,20 +455,22 @@ def normalize_tuning_maps(definition_maps):
 
 empirical_summary_maps = np.stack(
     [
-        empirical_tuning.position_tuning[..., empirical_tuning.local_unit_index(int(unit))]
+        empirical_position_tuning[..., empirical_column[int(unit)]]
         for unit in summary_units
     ],
     axis=-1,
 )
-local_drive_tuning = compute_local_arrival_tuning(
+local_drive_tuning = compute_one_step_tuning(
     experiment,
     summary_units,
-    drive_batch_size=exhaustive_drive_batch_size,
+    experiment.local_egocentric_elements,
+    drive_batch_size=one_step_drive_batch_size,
 )
-all_drive_tuning = compute_all_pairs_tuning(
+all_drive_tuning = compute_one_step_tuning(
     experiment,
     summary_units,
-    drive_batch_size=exhaustive_drive_batch_size,
+    experiment.group.elements(),
+    drive_batch_size=one_step_drive_batch_size,
 )
 summary_definition_maps = np.stack(
     [
@@ -590,11 +576,11 @@ for definition_index, (subfigure, title) in enumerate(
         ),
         (
             local_drive_subfigure,
-            "D. Exhaustive local drive tuning",
+            "D. Exact local one-step tuning",
         ),
         (
             all_drive_subfigure,
-            "E. Exhaustive all drive tuning",
+            "E. Exact all-pairs one-step tuning",
         ),
     )
 ):
@@ -640,7 +626,7 @@ plt.show()
 
 empirical_pose_tuning = np.stack(
     [
-        empirical_tuning.pose_tuning[..., empirical_tuning.local_unit_index(int(unit))]
+        empirical_pose_tuning[..., empirical_column[int(unit)]]
         for unit in summary_units
     ],
     axis=-1,
@@ -660,8 +646,8 @@ local_drive_pose_tuning = local_drive_tuning.pose_mean.reshape(
 
 position_tuning_definitions = (
     ("Empirical trajectories", np.nanmean(empirical_pose_tuning, axis=0)),
-    ("Exhaustive local drive", local_drive_tuning.position_mean),
-    ("Exhaustive all drive", all_drive_tuning.position_mean),
+    ("Exact local one-step", local_drive_tuning.position_mean),
+    ("Exact all-pairs one-step", all_drive_tuning.position_mean),
 )
 
 tuning_definition_maps = np.stack(
@@ -762,7 +748,7 @@ for rotation in range(G.m):
         coordinate_mode="axial",
     )
 plot_lattice_scalar(
-    empirical_tuning.position_occupancy,
+    empirical_position_occupancy,
     ax=occupancy_axes[G.m],
     title="all headings",
     colorbar=False,
@@ -772,6 +758,31 @@ occupancy_figure.suptitle("Trajectory sample occupancy")
 plt.show()
 
 # %%
+def masked_periodic_spatial_autocorrelation(values):
+    """Correlate each periodic spatial shift using only observed bin pairs."""
+    values = np.asarray(values, dtype=float)
+    if values.ndim != 2:
+        raise ValueError("values must be a two-dimensional spatial field")
+    valid = np.isfinite(values)
+    if not np.any(valid):
+        return np.full_like(values, np.nan)
+    centered = np.where(valid, values - values[valid].mean(), 0.0)
+    zero_lag = np.mean(centered[valid] ** 2)
+    if np.isclose(zero_lag, 0):
+        return np.zeros_like(values)
+
+    autocorrelation = np.full_like(values, np.nan)
+    for shift_x in range(values.shape[0]):
+        for shift_y in range(values.shape[1]):
+            shifted = np.roll(centered, (shift_x, shift_y), axis=(0, 1))
+            paired = valid & np.roll(valid, (shift_x, shift_y), axis=(0, 1))
+            if np.any(paired):
+                autocorrelation[shift_x, shift_y] = (
+                    np.mean(centered[paired] * shifted[paired]) / zero_lag
+                )
+    return np.clip(np.fft.fftshift(autocorrelation), -1, 1)
+
+
 autocorrelation_figure, autocorrelation_axes = plt.subplots(
     1,
     len(summary_units),
@@ -786,9 +797,9 @@ for column, (irrep_label, mode_label, unit) in enumerate(
         summary_units,
     )
 ):
-    local_index = empirical_tuning.local_unit_index(int(unit))
+    local_index = empirical_column[int(unit)]
     autocorrelation = masked_periodic_spatial_autocorrelation(
-        empirical_tuning.position_tuning[..., local_index]
+        empirical_position_tuning[..., local_index]
     )
     plot_lattice_scalar(
         autocorrelation,
@@ -806,9 +817,8 @@ plt.show()
 # %% [markdown]
 # ## Summary
 #
-# Empirical trajectory, exhaustive all drive, and exhaustive local drive tuning
-# now have separate result objects and a matched comparison. The empirical cache
-# remains valid across all plotting edits.
+# Empirical trajectory, exact all-pairs, and exact local one-step tuning
+# now have separate result objects and a matched comparison.
 
 # %% [markdown]
 # ## 7. Paper Figure 8 draft
@@ -867,12 +877,11 @@ panel_a_drive_elements = tuple(
     for turn in (-1, 0, 1)
     for dx, dy in panel_a_relative_directions
 )
-panel_a_limit_tuning = compute_arrival_tuning(
+panel_a_limit_tuning = compute_one_step_tuning(
     experiment,
     summary_units,
     panel_a_drive_elements,
-    drive_scope="periodic random walk",
-    drive_batch_size=exhaustive_drive_batch_size,
+    drive_batch_size=one_step_drive_batch_size,
 )
 panel_a_units = np.asarray((2095, 8229), dtype=int)
 panel_a_irreps = tuple(int(params.metadata[int(unit)]["irrep_index"]) for unit in panel_a_units)
@@ -883,23 +892,16 @@ panel_a_limit_lookup = {
 }
 panel_a_results = [
     [
-        load_or_compute_empirical_trajectory_tuning(
+        compute_empirical_trajectory_tuning(
             experiment,
             [int(unit)],
             motion_config=panel_a_motion_config,
-            tuning_config=replace(
-                tuning_config,
-                num_trajectories=count,
-                steps_per_trajectory=panel_a_steps_per_trajectory,
-                burn_in_steps=panel_a_burn_in_steps,
-                seed=panel_a_seed,
-                min_occupancy=1,
-                margin=0,
-                batch_size=panel_a_batch_size,
-            ),
-            cache_directory=tuning_cache_directory,
-            recompute=False,
-            use_cache=True,
+            num_trajectories=count,
+            steps_per_trajectory=panel_a_steps_per_trajectory,
+            burn_in_steps=panel_a_burn_in_steps,
+            seed=panel_a_seed,
+            margin=0,
+            batch_size=panel_a_batch_size,
         )
         for count in panel_a_trajectory_counts
     ]
@@ -914,7 +916,14 @@ panel_a_all_pairs_indices = []
 for unit, empirical_results in zip(panel_a_units, panel_a_results, strict=True):
     all_pairs_index = int(np.flatnonzero(all_drive_tuning.unit_indices == unit)[0])
     panel_a_all_pairs_indices.append(all_pairs_index)
-    unit_maps = [result.position_tuning[..., 0] for result in empirical_results]
+    unit_maps = [
+        occupancy_normalized_activity(
+            result.pose_activity_sums.sum(axis=0),
+            result.pose_occupancy.sum(axis=0),
+            min_occupancy=1,
+        )[..., 0]
+        for result in empirical_results
+    ]
     unit_maps.append(
         np.roll(
             all_drive_tuning.position_mean[..., all_pairs_index],
@@ -955,10 +964,11 @@ for irrep_index in panel_c_irreps:
         selected_for_irrep.append(unit)
     panel_c_units_by_irrep[irrep_index] = np.asarray(selected_for_irrep, dtype=int)
 panel_c_units = np.concatenate(list(panel_c_units_by_irrep.values()))
-panel_c_tuning = compute_all_pairs_tuning(
+panel_c_tuning = compute_one_step_tuning(
     experiment,
     panel_c_units,
-    drive_batch_size=exhaustive_drive_batch_size,
+    experiment.group.elements(),
+    drive_batch_size=one_step_drive_batch_size,
 )
 panel_c_lookup = {int(unit): index for index, unit in enumerate(panel_c_tuning.unit_indices)}
 
@@ -989,10 +999,11 @@ for irrep_index in panel_c_irreps:
         dtype=int,
     )
 panel_c_k0_units = np.concatenate(list(panel_c_k0_units_by_irrep.values()))
-panel_c_k0_tuning = compute_all_pairs_tuning(
+panel_c_k0_tuning = compute_one_step_tuning(
     experiment,
     panel_c_k0_units,
-    drive_batch_size=exhaustive_drive_batch_size,
+    experiment.group.elements(),
+    drive_batch_size=one_step_drive_batch_size,
 )
 panel_c_k0_lookup = {int(unit): index for index, unit in enumerate(panel_c_k0_tuning.unit_indices)}
 
@@ -1024,10 +1035,11 @@ for irrep_index in panel_c_irreps:
         dtype=int,
     )
 panel_c_phase_sign_units = np.concatenate(list(panel_c_phase_sign_units_by_irrep.values()))
-panel_c_phase_sign_tuning = compute_all_pairs_tuning(
+panel_c_phase_sign_tuning = compute_one_step_tuning(
     experiment,
     panel_c_phase_sign_units,
-    drive_batch_size=exhaustive_drive_batch_size,
+    experiment.group.elements(),
+    drive_batch_size=one_step_drive_batch_size,
 )
 panel_c_phase_sign_lookup = {
     int(unit): index for index, unit in enumerate(panel_c_phase_sign_tuning.unit_indices)
@@ -1041,7 +1053,7 @@ def relative_modulation(values):
 
 
 # Panel D contrasts three response types under the same all-pairs definition.
-# These unit IDs are the deterministic result of the exhaustive 23,724-unit
+# These unit IDs are the deterministic result of the exact 23,724-unit
 # audit documented alongside the figure.  Reuse them during ordinary figure
 # renders so work on another panel does not repeat that expensive search.
 flat_modulation_threshold = 1e-6
@@ -1055,10 +1067,11 @@ panel_d_category_labels = (
     "Orientation only",
     "Conjunctive",
 )
-panel_d_tuning = compute_all_pairs_tuning(
+panel_d_tuning = compute_one_step_tuning(
     experiment,
     panel_d_category_units,
-    drive_batch_size=exhaustive_drive_batch_size,
+    experiment.group.elements(),
+    drive_batch_size=one_step_drive_batch_size,
 )
 panel_d_pose_tuning = panel_d_tuning.pose_mean.reshape(
     G.m,
@@ -1743,7 +1756,11 @@ for unit, empirical_results, all_pairs_index in zip(
         G.n,
     )
     all_pairs_pose = np.roll(all_pairs_pose, initial_pose[:2], axis=(1, 2))
-    empirical_pose = empirical_results[-1].pose_tuning[..., 0]
+    empirical_pose = occupancy_normalized_activity(
+        empirical_results[-1].pose_activity_sums,
+        empirical_results[-1].pose_occupancy,
+        min_occupancy=1,
+    )[..., 0]
     print(
         f"  unit {int(unit)}: N=100,000 correlation with "
         f"exact walk={masked_correlation(empirical_pose, local_pose):.3f}, "

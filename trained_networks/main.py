@@ -15,7 +15,7 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 
 import src.template as template
-from src.groups import make_group
+from src.groups.factory import make_group
 from src.groups.cnxcn import ProductCyclicGroup
 from trained_networks import dataset, model, optimizer, viz
 

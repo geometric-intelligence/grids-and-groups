@@ -2,7 +2,9 @@
 
 import numpy as np
 
-from src.groups import DihedralGroup, DiscreteSE2Group, OppositeGroup
+from src.groups.dn import DihedralGroup
+from src.groups.opposite import OppositeGroup
+from src.groups.znxzn_cm import DiscreteSE2Group
 
 
 def test_right_action_moves_state_by_body_frame_product():

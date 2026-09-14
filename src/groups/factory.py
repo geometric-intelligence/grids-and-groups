@@ -1,0 +1,32 @@
+"""Build a group from the group name and data configuration used in training."""
+
+from src.groups.a5 import IcosahedralGroup
+from src.groups.cn import CyclicGroup
+from src.groups.cnxcn import ProductCyclicGroup
+from src.groups.dn import DihedralGroup
+from src.groups.oh import OctahedralGroup
+from src.groups.znxzn_cm import DiscreteSE2Group
+from src.groups.znxznxzn_a4 import DiscreteSE3A4Group
+from src.groups.znxznxzn_oh import DiscreteSE3Group
+
+
+def make_group(group_name: str, config: dict):
+    """Instantiate the group named by a training-run configuration."""
+    data = config["data"]
+    if group_name == "cn":
+        return CyclicGroup(N=data["p"])
+    if group_name == "cnxcn":
+        return ProductCyclicGroup(p1=data["p1"], p2=data["p2"])
+    if group_name == "dihedral":
+        return DihedralGroup(N=data.get("group_n", 3))
+    if group_name == "octahedral":
+        return OctahedralGroup()
+    if group_name == "A5":
+        return IcosahedralGroup()
+    if group_name == "znxzn_cm":
+        return DiscreteSE2Group(n=data["p"], m=data["m"])
+    if group_name == "znxznxzn_a4":
+        return DiscreteSE3A4Group(n=data["p"])
+    if group_name == "znxznxzn_oh":
+        return DiscreteSE3Group(n=data["p"])
+    raise ValueError(f"Unknown group_name: {group_name}")

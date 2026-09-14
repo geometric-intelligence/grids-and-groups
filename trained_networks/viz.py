@@ -310,7 +310,7 @@ def _training_loss_log_y_floor(ax):
 
 def _theory_loss_y_levels_from_run(run_dir: Path, cfg: dict) -> list[float] | None:
     """Template MSE plateau levels via ``loss_plateau_predictions``."""
-    from src.groups import make_group
+    from src.groups.factory import make_group
 
     tpl_path = run_dir / "template.npy"
     if not tpl_path.exists():
@@ -754,7 +754,7 @@ def load_w_dominant_irrep_fraction_for_run_dir(run_dir: str | Path) -> dict | No
     import torch
     import yaml
 
-    from src.groups import make_group
+    from src.groups.factory import make_group
 
     run_dir = Path(run_dir)
     npz = run_dir / "w_dominant_irrep_fraction.npz"

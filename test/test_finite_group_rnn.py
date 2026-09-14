@@ -27,29 +27,33 @@ from src.geometry.cnxcn import (
 from src.geometry.cnxcn import (
     transformed_center as transformed_cnxcn_center,
 )
-from src.geometry.discrete_se2 import (
-    NaturalisticMotionConfig,
+from src.geometry.discrete_se2.core import (
     align_rotation_slice,
-    center_errors_periodic_triangular,
-    decode_elements_from_template_orbit,
-    decode_poses_from_template_orbit,
-    decode_spatial_argmax,
-    gaussian_bump,
     lattice_path_coordinates,
-    make_momentum_motion_sequence,
-    make_naturalistic_motion_sequence,
     offset_coordinates,
     periodic_distance_squared,
     signal_to_tensor,
     transformed_center,
 )
-from src.geometry.discrete_se2 import (
+from src.geometry.discrete_se2.decoding import (
+    center_errors_periodic_triangular,
+    decode_elements_from_template_orbit,
+    decode_poses_from_template_orbit,
+    decode_spatial_argmax,
+)
+from src.geometry.discrete_se2.encoding import gaussian_bump
+from src.geometry.discrete_se2.trajectories import (
+    NaturalisticMotionConfig,
+    make_momentum_motion_sequence,
+    make_naturalistic_motion_sequence,
+)
+from src.geometry.discrete_se2.core import (
     advanced_pose as advance_se2_pose,
 )
-from src.geometry.discrete_se2 import (
+from src.geometry.discrete_se2.decoding import (
     decode_pose as decode_se2_pose,
 )
-from src.geometry.discrete_se2 import (
+from src.geometry.discrete_se2.core import (
     transformed_pose as transformed_se2_pose,
 )
 from src.geometry.discrete_se3 import (
@@ -67,7 +71,7 @@ from src.geometry.discrete_se3 import (
 from src.geometry.discrete_se3 import (
     periodic_distance_squared as periodic_distance_squared_3d,
 )
-from src.groups import as_action_group
+from src.groups.opposite import as_action_group
 from src.groups.cnxcn import ProductCyclicGroup
 from src.groups.znxzn_cm import DiscreteSE2Group
 from src.groups.znxznxzn_oh import DiscreteSE3Group

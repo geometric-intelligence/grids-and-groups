@@ -47,7 +47,7 @@ from src.geometry.cnxcn import (
     signal_to_grid,
     transformed_center,
 )
-from src.groups import ProductCyclicGroup
+from src.groups.cnxcn import ProductCyclicGroup
 from src.neural_manifold import (
     analyze_module_orbit,
     build_module_orbits,

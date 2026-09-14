@@ -38,9 +38,8 @@ jupytext --from py:percent --to ipynb \
 Execute the generated notebook separately when saved outputs are desired.
 Do not edit both formats independently.
 
-The tuning notebook caches expensive occupancy statistics under the gitignored
-`artifacts/constructed_networks/discrete_se2_c6/` directory. Plot changes do
-not invalidate that artifact.
+The tuning notebook computes empirical occupancy statistics directly. Rerun
+that cell when its trajectory or tuning settings change.
 
 ## Overview
 
@@ -53,7 +52,7 @@ not invalidate that artifact.
 | [`trained_networks/discrete_se2_local_composition.ipynb`](trained_networks/discrete_se2_local_composition.ipynb) | Trained QuadraticRNN | Test whether local generator compositions generalize globally |
 | [`constructed_networks/rnn_constructed_cnxcn.ipynb`](constructed_networks/rnn_constructed_cnxcn.ipynb) | Closed-form QuadraticRNN | Exact and Fourier-truncated translations on \(C_n\times C_n\) |
 | [`constructed_networks/rnn_constructed_discrete_se2_c6.ipynb`](constructed_networks/rnn_constructed_discrete_se2_c6.ipynb) | Closed-form QuadraticRNN | C6 construction, regular actions, naturalistic rollout, and decoding |
-| [`constructed_networks/rnn_constructed_discrete_se2_c6_tuning.ipynb`](constructed_networks/rnn_constructed_discrete_se2_c6_tuning.ipynb) | Tuning analysis | Empirical trajectories, exhaustive all-pairs, and local-arrival tuning |
+| [`constructed_networks/rnn_constructed_discrete_se2_c6_tuning.ipynb`](constructed_networks/rnn_constructed_discrete_se2_c6_tuning.ipynb) | Tuning analysis | Empirical trajectories, exact all-pairs, and local one-step tuning |
 | [`constructed_networks/rnn_constructed_discrete_se2_c6_manifolds.ipynb`](constructed_networks/rnn_constructed_discrete_se2_c6_manifolds.ipynb) | Neural-manifold analysis | Fixed points, irrep modules, UMAP, and persistent homology |
 | [`constructed_networks/rnn_constructed_discrete_SE3.ipynb`](constructed_networks/rnn_constructed_discrete_SE3.ipynb) | Closed-form QuadraticRNN | Exact and cost-aware truncated constructions on \(\mathbb Z_n^3\rtimes O\) |
 
@@ -174,7 +173,7 @@ $$
 
 The construction notebook covers group conventions, deterministic network
 construction, and naturalistic rollout. The tuning notebook compares empirical
-trajectory tuning with exhaustive all-pairs and local-arrival definitions. The
+trajectory tuning with exact all-pairs and local one-step definitions. The
 manifold notebook contains fixed-point, module-orbit, UMAP, and
 persistent-homology analyses.
 

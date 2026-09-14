@@ -82,13 +82,9 @@ def random_invertible_encoding(
 
 def hidden_width(irrep, *, q_rho: int = 3) -> int:
     """Number of hidden units contributed by one irrep."""
-    _validate_q_rho(q_rho)
-    return 4 * q_rho * irrep.dim**3
-
-
-def _validate_q_rho(q_rho: int) -> None:
     if isinstance(q_rho, bool) or not isinstance(q_rho, (int, np.integer)) or q_rho < 3:
         raise ValueError("q_rho must be an integer greater than or equal to 3")
+    return 4 * q_rho * irrep.dim**3
 
 
 def select_irreps_by_power(
@@ -243,12 +239,9 @@ class FiniteGroupRNN(nn.Module):
     def group_size(self) -> int:
         return self.W_in.shape[1]
 
-    def _as_tensor(self, values) -> torch.Tensor:
-        return torch.as_tensor(values, dtype=self.W_in.dtype, device=self.W_in.device)
-
     def apply_mix(self, hidden: torch.Tensor) -> torch.Tensor:
         """Apply ``W_in W_out`` without requiring a dense hidden-by-hidden matrix."""
-        hidden = self._as_tensor(hidden)
+        hidden = torch.as_tensor(hidden, dtype=self.W_in.dtype, device=self.W_in.device)
         if self.W_mix is not None:
             return F.linear(hidden, self.W_mix)
         return F.linear(F.linear(hidden, self.W_out), self.W_in)
@@ -259,8 +252,8 @@ class FiniteGroupRNN(nn.Module):
         drives,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return all outputs and hidden states for encoded drive signals."""
-        x_allo = self._as_tensor(x_allo)
-        drives = self._as_tensor(drives)
+        x_allo = torch.as_tensor(x_allo, dtype=self.W_in.dtype, device=self.W_in.device)
+        drives = torch.as_tensor(drives, dtype=self.W_in.dtype, device=self.W_in.device)
 
         if x_allo.ndim == 1:
             x_allo = x_allo.unsqueeze(0)
@@ -373,12 +366,16 @@ class FiniteGroupRNN(nn.Module):
         if np.any(selected < 0) or np.any(selected >= self.hidden_dim):
             raise ValueError("hidden_indices contain an invalid hidden-unit index")
 
-        x_allo_tensor = self._as_tensor(x_allo)
+        x_allo_tensor = torch.as_tensor(
+            x_allo,
+            dtype=self.W_in.dtype,
+            device=self.W_in.device,
+        )
         if x_allo_tensor.ndim != 1 or x_allo_tensor.shape[0] != self.group_size:
             raise ValueError(f"x_allo must have shape ({self.group_size},)")
         x_allo_tensor = x_allo_tensor.expand(sequence_array.shape[0], -1)
         x_ego = self.x_ego.detach().cpu().numpy()
-        drives = self._as_tensor(
+        drives = torch.as_tensor(
             np.stack(
                 [
                     np.stack(
@@ -389,7 +386,9 @@ class FiniteGroupRNN(nn.Module):
                     )
                     for sequence in sequence_array
                 ]
-            )
+            ),
+            dtype=self.W_in.dtype,
+            device=self.W_in.device,
         )
         selected_tensor = torch.as_tensor(
             selected,
@@ -439,7 +438,11 @@ class FiniteGroupRNN(nn.Module):
             "cumulative_states": torch.as_tensor(
                 cumulative_states, dtype=torch.long, device=self.W_in.device
             ),
-            "true_outputs": self._as_tensor(np.asarray(true_outputs)),
+            "true_outputs": torch.as_tensor(
+                np.asarray(true_outputs),
+                dtype=self.W_in.dtype,
+                device=self.W_in.device,
+            ),
             "predicted_outputs": outputs.squeeze(0),
             "hidden_states": hidden_states.squeeze(0),
         }
@@ -468,8 +471,22 @@ class FiniteGroupRNN(nn.Module):
             drive_element, self.x_ego.detach().cpu().numpy()
         )
         return squared_relu(
-            F.linear(self._as_tensor(allocentric_orbit), self.W_in)
-            + F.linear(self._as_tensor(drive), self.W_drive)
+            F.linear(
+                torch.as_tensor(
+                    allocentric_orbit,
+                    dtype=self.W_in.dtype,
+                    device=self.W_in.device,
+                ),
+                self.W_in,
+            )
+            + F.linear(
+                torch.as_tensor(
+                    drive,
+                    dtype=self.W_in.dtype,
+                    device=self.W_in.device,
+                ),
+                self.W_drive,
+            )
         )
 
 
@@ -523,7 +540,8 @@ def build_finite_group_rnn(
     ``(A_u, A_v, A_w)`` factors. Its three entries must be positive and have
     product one so the closed-form reconstruction identity remains unchanged.
     """
-    _validate_q_rho(q_rho)
+    if isinstance(q_rho, bool) or not isinstance(q_rho, (int, np.integer)) or q_rho < 3:
+        raise ValueError("q_rho must be an integer greater than or equal to 3")
     physical_group = group
     group = as_action_group(group, action_side)
     if irreps is None:
@@ -641,27 +659,4 @@ def build_finite_group_rnn(
         metadata=metadata,
         amplitude_mode=amplitude_mode,
         amplitude_multipliers=tuple(float(value) for value in amplitude_multipliers),
-    )
-
-
-def rollout(model: FiniteGroupRNN, x_allo, sequence) -> dict[str, np.ndarray]:
-    """Compatibility wrapper returning NumPy rollout arrays."""
-    return {
-        key: value.detach().cpu().numpy()
-        for key, value in model.rollout(x_allo, sequence).items()
-    }
-
-
-def probe_hidden_states(
-    model: FiniteGroupRNN,
-    x_allo,
-    *,
-    drive_element: int | None = None,
-) -> np.ndarray:
-    """Compatibility wrapper returning a NumPy static-response array."""
-    return (
-        model.probe_hidden_states(x_allo, drive_element=drive_element)
-        .detach()
-        .cpu()
-        .numpy()
     )

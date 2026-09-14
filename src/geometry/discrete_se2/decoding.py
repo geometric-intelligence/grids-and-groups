@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from src.groups import as_action_group
+from src.groups.opposite import as_action_group
 
 from .core import (
     advanced_pose,

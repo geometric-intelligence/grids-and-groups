@@ -7,16 +7,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from src.finite_group_rnn import build_finite_group_rnn, random_invertible_encoding
-from src.geometry.discrete_se2 import (
+from src.geometry.discrete_se2.core import advanced_pose, transformed_pose
+from src.geometry.discrete_se2.encoding import gaussian_bump
+from src.geometry.discrete_se2.trajectories import (
     NaturalisticMotionConfig,
-    advanced_pose,
-    center_errors_periodic_triangular,
-    decode_poses_from_template_orbit,
-    gaussian_bump,
     make_naturalistic_motion_sequence,
-    transformed_pose,
 )
-from src.groups import DiscreteSE2Group
+from src.groups.znxzn_cm import DiscreteSE2Group
 
 _ENCODING_OPTIONS = {
     "one-hot",
@@ -113,36 +110,6 @@ class DiscreteSE2RolloutConfig:
             raise ValueError("snapshot_steps must index the rollout")
 
 
-@dataclass(frozen=True)
-class DiscreteSE2ManifoldConfig:
-    """Sampling and topology choices for module-restricted manifolds."""
-
-    num_modules: int = 6
-    spatial_samples: int = 12
-    fixed_point_tolerance: float = 1e-8
-    fixed_point_max_iterations: int = 50
-    max_persistence_points: int = 300
-    max_homology_dimension: int = 2
-    random_seed: int = 11
-    umap_components: int = 3
-
-    def __post_init__(self) -> None:
-        if self.num_modules < 1:
-            raise ValueError("num_modules must be positive")
-        if self.spatial_samples < 2:
-            raise ValueError("spatial_samples must be at least 2")
-        if self.fixed_point_tolerance <= 0:
-            raise ValueError("fixed_point_tolerance must be positive")
-        if self.fixed_point_max_iterations < 1:
-            raise ValueError("fixed_point_max_iterations must be positive")
-        if self.max_persistence_points < 2:
-            raise ValueError("max_persistence_points must be at least 2")
-        if self.max_homology_dimension < 0:
-            raise ValueError("max_homology_dimension must be nonnegative")
-        if self.umap_components < 1:
-            raise ValueError("umap_components must be positive")
-
-
 @dataclass
 class DiscreteSE2Experiment:
     """Constructed group, signals, model, and local-drive support."""
@@ -178,49 +145,6 @@ class DiscreteSE2Rollout:
     heading_changes: int
     stationary_steps: int
     immediate_reversals: int
-
-
-def default_c6_experiment_config() -> DiscreteSE2ExperimentConfig:
-    """Return the canonical C6 construction."""
-    return DiscreteSE2ExperimentConfig()
-
-
-def default_c6_motion_config() -> NaturalisticMotionConfig:
-    """Return the explicit forward-biased C6 motion policy."""
-    return NaturalisticMotionConfig(
-        stay_probability=0.05,
-        forward_probability=0.70,
-        forward_left_or_right_probability=0.115,
-        backward_left_or_right_probability=0.005,
-        backward_probability=0.01,
-        turn_probability=0.12,
-        turn_persistence=0.20,
-        wall_lookahead=3,
-        wall_avoidance_strength=2.0,
-        minimum_wall_weight=0.05,
-    )
-
-
-def default_c6_rollout_config(
-    experiment_config: DiscreteSE2ExperimentConfig,
-) -> DiscreteSE2RolloutConfig:
-    """Return the primary rollout choices matched to an experiment."""
-    steps = 52
-    center = experiment_config.n_spatial // 2
-    snapshots = (0, steps // 2, steps - 1)
-    return DiscreteSE2RolloutConfig(
-        steps=steps,
-        seed=1,
-        margin=1,
-        start_xy=(center, center),
-        arrow_stride=2,
-        snapshot_steps=snapshots,
-    )
-
-
-def default_c6_manifold_config() -> DiscreteSE2ManifoldConfig:
-    """Return the canonical manifold-analysis choices."""
-    return DiscreteSE2ManifoldConfig()
 
 
 def _orientation_weights(
@@ -260,10 +184,9 @@ def _allocentric_signal(
 
 
 def build_discrete_se2_experiment(
-    config: DiscreteSE2ExperimentConfig | None = None,
+    config: DiscreteSE2ExperimentConfig,
 ) -> DiscreteSE2Experiment:
     """Construct the deterministic C6 experiment represented by ``config``."""
-    config = default_c6_experiment_config() if config is None else config
     group = DiscreteSE2Group(
         n=config.n_spatial,
         m=config.n_orientations,
@@ -311,16 +234,17 @@ def build_discrete_se2_experiment(
 
 def run_discrete_se2_rollout(
     experiment: DiscreteSE2Experiment,
-    rollout_config: DiscreteSE2RolloutConfig | None = None,
-    motion_config: NaturalisticMotionConfig | None = None,
+    rollout_config: DiscreteSE2RolloutConfig,
+    motion_config: NaturalisticMotionConfig,
 ) -> DiscreteSE2Rollout:
     """Generate, evaluate, and decode one naturalistic rollout."""
+    from src.geometry.discrete_se2.decoding import (
+        center_errors_periodic_triangular,
+        decode_poses_from_template_orbit,
+    )
+
     config = experiment.config
     group = experiment.group
-    if rollout_config is None:
-        rollout_config = default_c6_rollout_config(config)
-    if motion_config is None:
-        motion_config = default_c6_motion_config()
     sequence = make_naturalistic_motion_sequence(
         group,
         steps=rollout_config.steps,

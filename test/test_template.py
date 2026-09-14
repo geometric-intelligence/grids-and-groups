@@ -111,7 +111,7 @@ class TestFixedGroup:
     @pytest.fixture
     def dihedral_group(self):
         """Create a DihedralGroup for testing."""
-        from src.groups import DihedralGroup
+        from src.groups.dn import DihedralGroup
 
         return DihedralGroup(N=3)
 

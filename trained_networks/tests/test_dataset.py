@@ -5,7 +5,7 @@ import pytest
 import torch
 
 import trained_networks.dataset as dataset
-from src.groups import DihedralGroup
+from src.groups.dn import DihedralGroup
 from src.groups.cn import CyclicGroup
 from src.groups.cnxcn import ProductCyclicGroup
 

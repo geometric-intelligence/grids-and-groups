@@ -45,7 +45,7 @@ from src.geometry.discrete_se3 import (
     spatial_energy,
     spatial_marginal,
 )
-from src.groups import DiscreteSE3Group
+from src.groups.znxznxzn_oh import DiscreteSE3Group
 from src.neural_manifold import (
     analyze_module_orbits,
     build_module_orbits,

@@ -8,7 +8,7 @@
 #
 # This is deliberately a research notebook, not a plotting library. Run the setup once, then run the panel you want. Each panel writes one editable SVG to `artifacts/constructed_networks/discrete_se2_c6/paper_figures/`.
 #
-# The construction is the full, untruncated $n=21$ model. Panel A uses a true periodic local random walk: all $7\times3=21$ local actions are equally likely. Panels B--E use exact all-pairs tuning unless stated otherwise.
+# The construction is the full, untruncated $n=21$ model. Panel A uses a true periodic local random walk: all $7\times3=21$ local actions are equally likely. Set `exact_tuning_scope` below to choose the exact one-step definition used by Panels A and C--E.
 
 # %%
 from pathlib import Path
@@ -29,15 +29,15 @@ project_root = next(folder for folder in (Path.cwd(), *Path.cwd().parents) if (f
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from src.analysis import (
-    TrajectoryTuningConfig,
-    compute_all_pairs_tuning,
-    compute_local_arrival_tuning,
-    load_or_compute_empirical_trajectory_tuning,
+from src.analysis.tuning import (
+    compute_empirical_trajectory_tuning,
+    compute_one_step_tuning,
+    occupancy_normalized_activity,
 )
 from src.experiments.discrete_se2 import DiscreteSE2ExperimentConfig, build_discrete_se2_experiment
-from src.geometry.discrete_se2 import NaturalisticMotionConfig, plot_lattice_scalar
-from src.groups import DiscreteSE2Group
+from src.geometry.discrete_se2.plotting import plot_lattice_scalar
+from src.geometry.discrete_se2.trajectories import NaturalisticMotionConfig
+from src.groups.znxzn_cm import DiscreteSE2Group
 
 plt.rcParams["svg.fonttype"] = "none"
 
@@ -100,6 +100,21 @@ local_random_walk = NaturalisticMotionConfig(
     periodic_boundaries=True,
 )
 
+# Set this once to choose the exact one-step definition used by Panels A, C,
+# D, and E. "local" averages uniformly over the 21 local actions; "all_pairs"
+# averages uniformly over all 2,646 group drives.
+exact_tuning_scope = "all_pairs"  # Change to "local" for the local one-step figure.
+if exact_tuning_scope == "all_pairs":
+    exact_drive_elements = experiment.group.elements()
+    exact_tuning_label = "exact all-pairs"
+    exact_tuning_note = "uniform average over all group drives"
+elif exact_tuning_scope == "local":
+    exact_drive_elements = experiment.local_egocentric_elements
+    exact_tuning_label = "exact local one-step"
+    exact_tuning_note = "uniform average over the 21 local actions"
+else:
+    raise ValueError("exact_tuning_scope must be 'all_pairs' or 'local'")
+
 
 def display_normalized(values):
     # Map one tuning curve to [0, 1] for plotting only.
@@ -146,11 +161,11 @@ def write_runtime(name, seconds, note=""):
         writer.writerow((name, f"{seconds:.3f}", f"{model_buffer_gib:.3f}", note))
 
 # %% [markdown]
-# ## Panel A — empirical convergence to all-pairs tuning
+# ## Panel A — empirical convergence to exact one-step tuning
 #
-# The empirical curve averages hidden activity at each position along independent periodic random walks. We use 110 steps per trajectory, discard the first 10, and therefore retain exactly $N=10^4,10^5,5\times10^5$ samples. The last column is the exact all-pairs curve,
+# The empirical curve averages hidden activity at each position along independent periodic random walks. We use 110 steps per trajectory, discard the first 10, and therefore retain exactly $N=10^4,10^5,5\times10^5$ samples. The last column is an exact one-step curve,
 #
-# $$T_{\mathrm{all}}(x)=\mathbb E_{g,a\sim\mathrm{Unif}(G)}[h(g,a)\mid x(g)=x].$$
+# The exact column is selected by exact_tuning_scope in the setup cell.
 
 # %%
 # Use two visually clear modules already featured in Panel C, rather than the
@@ -164,21 +179,29 @@ retained_steps = steps - burn_in
 empirical_curves = {unit: [] for unit in panel_a_units}
 for samples in sample_counts:
     assert samples % retained_steps == 0
-    result = load_or_compute_empirical_trajectory_tuning(
+    result = compute_empirical_trajectory_tuning(
         experiment, panel_a_units,
         motion_config=local_random_walk,
-        tuning_config=TrajectoryTuningConfig(
-            num_trajectories=samples // retained_steps, steps_per_trajectory=steps, burn_in_steps=burn_in,
-            seed=101, min_occupancy=1, margin=0, batch_size=8, cache_schema_version=1,
-        ),
-        cache_directory=figures.parent, recompute=False, use_cache=True,
+        num_trajectories=samples // retained_steps,
+        steps_per_trajectory=steps,
+        burn_in_steps=burn_in,
+        seed=101,
+        margin=0,
+        batch_size=8,
+    )
+    position_tuning = occupancy_normalized_activity(
+        result.pose_activity_sums.sum(axis=0),
+        result.pose_occupancy.sum(axis=0),
+        min_occupancy=1,
     )
     for column, unit in enumerate(result.unit_indices):
-        empirical_curves[unit].append(result.position_tuning[..., column])
+        empirical_curves[unit].append(position_tuning[..., column])
 
 started = time.perf_counter()
-exact_a = compute_all_pairs_tuning(experiment, panel_a_units, drive_batch_size=32)
-write_runtime("Panel A: exact all-pairs", time.perf_counter() - started, "three neurons")
+exact_a = compute_one_step_tuning(
+    experiment, panel_a_units, exact_drive_elements, drive_batch_size=32
+)
+write_runtime("Panel A: " + exact_tuning_label, time.perf_counter() - started, "three neurons; " + exact_tuning_note)
 
 def save_panel_a(exact_tuning, exact_title, filename):
     figure, axes = plt.subplots(3, 4, figsize=(8.4, 5.7), squeeze=False)
@@ -200,12 +223,7 @@ def save_panel_a(exact_tuning, exact_title, filename):
     print(f"Saved SVG: {path}")
 
 
-save_panel_a(exact_a, "exact\nall-pairs", "figure_8_panel_a.svg")
-
-started = time.perf_counter()
-exact_a_local = compute_local_arrival_tuning(experiment, panel_a_units, drive_batch_size=32)
-write_runtime("Panel A: exact local", time.perf_counter() - started, "three neurons; uniform average over 21 local actions")
-save_panel_a(exact_a_local, "exact\nlocal", "figure_8_panel_a_exact_local.svg")
+save_panel_a(exact_a, exact_tuning_label.replace(" ", "\n", 1), "figure_8_panel_a.svg")
 
 # %% [markdown]
 # ## Panel B — a $C_6$ orbit of characters of $C_n^2$
@@ -264,13 +282,17 @@ plt.close(figure)
 print(f"Saved SVG: {path_b}")
 
 # %% [markdown]
-# ## Panel C — algebraic-label effects on exact all-pairs tuning
+# ## Panel C — algebraic-label effects on exact one-step tuning
 #
 # Each column is a frequency module. The reference neuron has
 #
 # $$ (\epsilon_1,\epsilon_2,\delta;k_0,k_1,k_2)=(+1,+1,0;0,0,0). $$
 #
-# Each lower row changes exactly one label. The maps are the exact all-pairs spatial marginals, normalized separately only for display. Thus colour contrast does not report activity amplitude. The last two rows summarize all distinct spatial maps in each module: their translations relative to the reference, and their dominant spatial Fourier frequencies.
+# Each lower row changes exactly one label. The maps are exact spatial
+# marginals, normalized separately only for display. Thus colour contrast does
+# not report activity amplitude. The last two rows summarize all distinct
+# spatial maps in each module: their translations relative to the reference,
+# and their dominant spatial Fourier frequencies.
 
 # %%
 label_changes = (
@@ -288,8 +310,10 @@ panel_c_units = {
 }
 requested_units = tuple(dict.fromkeys(unit for rows in panel_c_units.values() for _, unit in rows))
 started = time.perf_counter()
-exact_c = compute_all_pairs_tuning(experiment, requested_units, drive_batch_size=32)
-write_runtime("Panel C: exact all-pairs", time.perf_counter() - started, "four reference neurons and six one-label changes each")
+exact_c = compute_one_step_tuning(
+    experiment, requested_units, exact_drive_elements, drive_batch_size=32
+)
+write_runtime("Panel C: " + exact_tuning_label, time.perf_counter() - started, "four reference neurons and six one-label changes each; " + exact_tuning_note)
 maps_c = {unit: exact_c.position_mean[..., column] for column, unit in enumerate(exact_c.unit_indices)}
 
 def best_translation_to_reference(reference, curve):
@@ -316,8 +340,10 @@ translation_units = {
 }
 all_translation_units = tuple(unit for units in translation_units.values() for unit in units)
 started = time.perf_counter()
-translation_tuning = compute_all_pairs_tuning(experiment, all_translation_units, drive_batch_size=32)
-write_runtime("Panel C: translation shifts", time.perf_counter() - started, "all k1=k2=0 representatives in four modules")
+translation_tuning = compute_one_step_tuning(
+    experiment, all_translation_units, exact_drive_elements, drive_batch_size=32
+)
+write_runtime("Panel C: translation shifts", time.perf_counter() - started, "all k1=k2=0 representatives in four modules; " + exact_tuning_note)
 translation_maps = {unit: translation_tuning.position_mean[..., column] for column, unit in enumerate(translation_tuning.unit_indices)}
 
 def periodic_density(points, bandwidth=0.8):
@@ -393,21 +419,14 @@ def save_panel_c(maps, translation_maps, tuning_label, filename):
     print(f"Saved SVG: {path}")
 
 
-save_panel_c(maps_c, translation_maps, "Exact all-pairs tuning", "figure_8_panel_c.svg")
-
-# Alternative: exact one-step tuning averaged only over the 21 local actions.
-started = time.perf_counter()
-local_c = compute_local_arrival_tuning(experiment, requested_units, drive_batch_size=32)
-local_translation_tuning = compute_local_arrival_tuning(experiment, all_translation_units, drive_batch_size=32)
-write_runtime("Panel C: exact local", time.perf_counter() - started, "label effects and translation shifts; uniform average over 21 local actions")
-local_maps_c = {unit: local_c.position_mean[..., column] for column, unit in enumerate(local_c.unit_indices)}
-local_translation_maps = {unit: local_translation_tuning.position_mean[..., column] for column, unit in enumerate(local_translation_tuning.unit_indices)}
-save_panel_c(local_maps_c, local_translation_maps, "Exact one-step local tuning", "figure_8_panel_c_exact_local.svg")
+save_panel_c(maps_c, translation_maps, exact_tuning_label, "figure_8_panel_c.svg")
 
 # %% [markdown]
 # ## Panel D — representative spatial, orientation, and conjunctive tuning
 #
-# From an exact all-pairs curve $T(x,\theta)$, define spatial and heading marginals $T_x(x)=\langle T\rangle_\theta$ and $T_\theta(\theta)=\langle T\rangle_x$. Their relative modulation is
+# From an exact one-step curve $T(x,\theta)$, define spatial and heading
+# marginals $T_x(x)=\langle T\rangle_\theta$ and
+# $T_\theta(\theta)=\langle T\rangle_x$. Their relative modulation is
 #
 # $$M(v)=\frac{\max v-\min v}{\max |v|}.$$
 #
@@ -419,8 +438,10 @@ units_d = tuple(
     if int(labels["irrep_index"]) in experiment.model.selected_irrep_indices and labels["k1"] == 0 and labels["k2"] == 0
 )
 started = time.perf_counter()
-exact_d = compute_all_pairs_tuning(experiment, units_d, drive_batch_size=16)
-write_runtime("Panel D/E: exact all-pairs", time.perf_counter() - started, "one representative per k1,k2 class")
+exact_d = compute_one_step_tuning(
+    experiment, units_d, exact_drive_elements, drive_batch_size=16
+)
+write_runtime("Panel D/E: " + exact_tuning_label, time.perf_counter() - started, "one representative per k1,k2 class; " + exact_tuning_note)
 def modulation(values):
     values = np.asarray(values)
     return float(np.ptp(values) / max(np.max(np.abs(values)), 1e-12))
@@ -501,18 +522,24 @@ def save_panel_d(tuning, tuning_label, filename, preferred_spatial_units=()):
     return records
 
 
-records_d = save_panel_d(exact_d, "all-pairs", "figure_8_panel_d.svg")
-
-started = time.perf_counter()
-exact_d_local = compute_local_arrival_tuning(experiment, units_d, drive_batch_size=16)
-write_runtime("Panel D: exact local", time.perf_counter() - started, "one representative per k1,k2 class; uniform average over 21 local actions")
-canonical_spatial_units = tuple(unit_with_labels(rho) for rho in (10, 36))
-records_d_local = save_panel_d(exact_d_local, "one-step local", "figure_8_panel_d_exact_local.svg", canonical_spatial_units)
+preferred_spatial_units = (
+    tuple(unit_with_labels(rho) for rho in (10, 36))
+    if exact_tuning_scope == "local"
+    else ()
+)
+records_d = save_panel_d(
+    exact_d,
+    exact_tuning_label,
+    "figure_8_panel_d.svg",
+    preferred_spatial_units,
+)
 
 # %% [markdown]
 # ## Panel E — selective-cell composition of the full network
 #
-# The exact classification from Panel D is expanded to every hidden-unit copy in the construction. These bar charts count spatial-only, conjunctive, and orientation-only neurons across the whole network, once for all-pairs tuning and once for local one-step tuning.
+# The exact classification from Panel D is expanded to every hidden-unit copy
+# in the construction. This bar chart counts spatial-only, conjunctive, and
+# orientation-only neurons across the whole network.
 
 # %%
 colours = {"Spatial only": "#4C78A8", "Conjunctive": "#F58518", "Orientation only": "#54A24B"}
@@ -542,131 +569,7 @@ def save_panel_e(records, tuning_label, filename):
     print(f"Saved SVG: {path}")
 
 
-save_panel_e(records_d, "Exact all-pairs tuning", "figure_8_panel_e.svg")
-save_panel_e(records_d_local, "Exact local one-step tuning (uniform average over 21 actions)", "figure_8_panel_e_exact_local.svg")
-
-# %% [markdown]
-# ## Optional diagnostic — comparing label changes by spatial symmetry
-#
-# These quantities are useful when interpreting Panel C, but they are not part of the manuscript panel. For centred spatial curves $\widetilde T=T-\bar T$ and $\widetilde T'$, let $r(A,B)$ be their Pearson correlation. We report
-#
-# $$r_0=r(T,T'),\qquad r_T=\max_\Delta r(T,\tau_\Delta T'),$$
-# $$r_{TR}=\max_{q\in C_6,\Delta}r(T,\tau_\Delta R_qT'),\qquad r_I=r(T,-T')=-r_0,$$
-# $$r_{\pm TR}=\max_{s\in\{-1,+1\},q\in C_6,\Delta}r(T,s\tau_\Delta R_qT').$$
-#
-# `r_T` asks whether two maps differ only by a translation; `r_{TR}` also allows lattice rotations; `r_{\pm TR}` additionally permits inversion. The code below computes a compact CSV for the same reference neurons used in Panel C.
-
-# %%
-def rotate_lattice(values, turns):
-    # Rotate an n-by-n lattice map by `turns` of 60 degrees.
-    rotated = np.empty_like(values)
-    for x0 in range(n):
-        for y0 in range(n):
-            x1, y1 = experiment.group.apply_rotation(turns, x0, y0)
-            rotated[x1, y1] = values[x0, y0]
-    return rotated
-
-
-def best_translation_correlation(reference, changed, turns=(0,), signs=(1,)):
-    # Maximise centred correlation over the specified rotations, signs, and translations.
-    reference = reference - reference.mean()
-    changed = changed - changed.mean()
-    denominator = max(np.linalg.norm(reference) * np.linalg.norm(changed), 1e-15)
-    best = -np.inf
-    for turn in turns:
-        rotated = rotate_lattice(changed, turn)
-        correlations = np.fft.ifft2(np.conj(np.fft.fft2(reference)) * np.fft.fft2(rotated)).real / denominator
-        for sign in signs:
-            best = max(best, float(np.max(sign * correlations)))
-    return best
-
-
-metric_rows = []
-for rho, variants in panel_c_units.items():
-    reference = maps_c[variants[0][1]]
-    reference_centered = reference - reference.mean()
-    for name, unit in variants[1:]:
-        changed = maps_c[unit]
-        changed_centered = changed - changed.mean()
-        denominator = max(np.linalg.norm(reference_centered) * np.linalg.norm(changed_centered), 1e-15)
-        r0 = float(np.sum(reference_centered * changed_centered) / denominator)
-        metric_rows.append((rho, name, r0,
-                            best_translation_correlation(reference, changed),
-                            best_translation_correlation(reference, changed, turns=range(6)),
-                            -r0,
-                            best_translation_correlation(reference, changed, turns=range(6), signs=(-1, 1))))
-metrics_path = figures / "figure_8_panel_c_label_correlations.csv"
-with metrics_path.open("w", newline="") as handle:
-    writer = csv.writer(handle)
-    writer.writerow(("rho", "label_change", "r0", "rT", "rTR", "rI", "r_plusminus_TR"))
-    writer.writerows(metric_rows)
-print(metrics_path)
-
-# %% [markdown]
-# ## Optional diagnostic — empirical label effects
-#
-# The following cell is intentionally off by default because it requires several minutes on Daisy and a full-width model. If enabled, it recreates the four-way per-reference comparison: empirical local random walks, empirical uniform-$G$ updates, exact local one-step tuning, and exact all-pairs tuning. It uses the same uniformly distributed 21 local actions defined in the setup.
-
-# %%
-RUN_EMPIRICAL_LABEL_EFFECTS = False
-
-if RUN_EMPIRICAL_LABEL_EFFECTS:
-    retained_samples = 500_000
-    if torch.cuda.is_available():
-        experiment.model.to("cuda")
-
-    # The full-group condition samples arbitrary right-action increments uniformly.
-    # It is deliberately non-naturalistic; its role is to separate finite sampling
-    # from the restriction to the local egocentric action set.
-    def empirical_full_group_maps(units, tuning_config):
-        sums = np.zeros((6, n, n, len(units)), dtype=float)
-        visits = np.zeros((6, n, n), dtype=int)
-        rng = np.random.default_rng(tuning_config.seed)
-        start_pose = experiment.group.encode(*configuration.initial_pose)
-        for first in range(0, tuning_config.num_trajectories, tuning_config.batch_size):
-            batch = min(tuning_config.batch_size, tuning_config.num_trajectories - first)
-            actions = rng.integers(experiment.group.order, size=(batch, tuning_config.steps_per_trajectory), dtype=np.int64)
-            poses = np.empty((batch, tuning_config.steps_per_trajectory, 3), dtype=int)
-            for row, trajectory in enumerate(actions):
-                pose = start_pose
-                for step, action in enumerate(trajectory):
-                    pose = experiment.group.compose(pose, int(action))
-                    poses[row, step] = experiment.group.decode(pose)
-            with torch.no_grad():
-                activity = experiment.model.selected_hidden_rollout(experiment.x_allo, actions, units).detach().cpu().numpy()
-            x0, y0, theta0 = poses[:, tuning_config.burn_in_steps:].reshape(-1, 3).T
-            np.add.at(sums, (theta0, x0, y0), activity[:, tuning_config.burn_in_steps:].reshape(-1, len(units)))
-            np.add.at(visits, (theta0, x0, y0), 1)
-        return {unit: np.divide(sums.sum(axis=0)[..., column], visits.sum(axis=0), out=np.full((n, n), np.nan), where=visits.sum(axis=0) > 0)
-                for column, unit in enumerate(units)}
-
-    all_units = tuple(dict.fromkeys(unit for rows in panel_c_units.values() for _, unit in rows))
-    tuning_config = TrajectoryTuningConfig(num_trajectories=retained_samples // 100, steps_per_trajectory=110, burn_in_steps=10,
-                                           seed=101, min_occupancy=1, margin=0, batch_size=64, cache_schema_version=1)
-    local = load_or_compute_empirical_trajectory_tuning(experiment, all_units, motion_config=local_random_walk, tuning_config=tuning_config,
-                                                         cache_directory=figures.parent, recompute=False, use_cache=True)
-    local_maps = {unit: local.position_tuning[..., column] for column, unit in enumerate(local.unit_indices)}
-    uniform_group_maps = empirical_full_group_maps(all_units, tuning_config)
-    exact_local = compute_local_arrival_tuning(experiment, all_units, drive_batch_size=32)
-    exact_local_maps = {unit: exact_local.position_mean[..., column] for column, unit in enumerate(exact_local.unit_indices)}
-
-    sections = ((r"empirical local ($N=500{,}000$)", local_maps), (r"empirical uniform $G$ ($N=500{,}000$)", uniform_group_maps),
-                (r"exact one-step local", exact_local_maps), (r"exact all-pairs", maps_c))
-    for rho, variants in panel_c_units.items():
-        figure, axes = plt.subplots(4, 7, figsize=(13, 8.5), squeeze=False)
-        figure.subplots_adjust(left=0.06, right=0.99, bottom=0.03, top=0.93, wspace=0.08, hspace=0.22)
-        for row, (heading, maps) in enumerate(sections):
-            for column, (name, unit) in enumerate(variants):
-                plot_lattice_scalar(display_normalized(maps[unit]), ax=axes[row, column], cmap="viridis", vmin=0, vmax=1,
-                                    colorbar=False, coordinate_mode="offset", wrap_periodic_edges=True)
-                if row == 0:
-                    axes[row, column].set_title("reference" if column == 0 else name, fontsize=8)
-            axes[row, 0].annotate(heading, (-0.08, 0.5), xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        figure.suptitle(rf"Algebraic-label effects, $\rho={rho}$", fontweight="bold")
-        path = figures / f"figure_8_panel_c_label_effects_four_way_n500000_rho_{rho}.svg"
-        figure.savefig(path, bbox_inches="tight")
-        plt.close(figure)
-        print(f"Saved SVG: {path}")
+save_panel_e(records_d, exact_tuning_label, "figure_8_panel_e.svg")
 
 # %% [markdown]
 # ## Assemble Figure 8

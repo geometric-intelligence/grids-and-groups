@@ -1,33 +1,25 @@
 """Tests for the split constructed discrete-SE(2) experiment workflow."""
 
-from dataclasses import replace
-
 import numpy as np
 import pytest
 
 from src.analysis.tuning import (
-    TrajectoryTuningConfig,
-    compute_all_pairs_tuning,
-    compute_local_arrival_tuning,
-    compute_trajectory_tuning,
-    load_or_compute_trajectory_tuning,
+    compute_empirical_trajectory_tuning,
+    compute_one_step_tuning,
     occupancy_normalized_activity,
-    trajectory_tuning_cache_key,
 )
 from src.experiments.discrete_se2 import (
     DiscreteSE2ExperimentConfig,
+    DiscreteSE2RolloutConfig,
     build_discrete_se2_experiment,
-    default_c6_experiment_config,
-    default_c6_motion_config,
-    default_c6_rollout_config,
     run_discrete_se2_rollout,
 )
+from src.geometry.discrete_se2.trajectories import NaturalisticMotionConfig
 
 
 @pytest.fixture(scope="module")
 def small_experiment():
-    config = replace(
-        default_c6_experiment_config(),
+    config = DiscreteSE2ExperimentConfig(
         n_spatial=4,
         initial_pose=(1, 1, 0),
         max_hidden_width=3_500,
@@ -39,8 +31,7 @@ def test_c6_config_validation_and_deterministic_construction():
     with pytest.raises(ValueError, match="requires C6"):
         DiscreteSE2ExperimentConfig(n_orientations=3)
 
-    config = replace(
-        default_c6_experiment_config(),
+    config = DiscreteSE2ExperimentConfig(
         n_spatial=4,
         initial_pose=(1, 1, 0),
         max_hidden_width=3_500,
@@ -58,14 +49,27 @@ def test_c6_config_validation_and_deterministic_construction():
 
 
 def test_selected_hidden_rollout_matches_full_rollout(small_experiment):
-    rollout_config = replace(
-        default_c6_rollout_config(small_experiment.config),
+    rollout_config = DiscreteSE2RolloutConfig(
         steps=8,
+        seed=1,
         margin=0,
+        start_xy=(2, 2),
         arrow_stride=1,
         snapshot_steps=(0, 4, 7),
     )
-    motion = default_c6_motion_config()
+    motion = NaturalisticMotionConfig(
+        stay_probability=0.05,
+        forward_probability=0.70,
+        forward_left_or_right_probability=0.115,
+        backward_left_or_right_probability=0.005,
+        backward_probability=0.01,
+        turn_probability=0.12,
+        turn_persistence=0.20,
+        wall_lookahead=3,
+        wall_avoidance_strength=2.0,
+        minimum_wall_weight=0.05,
+        periodic_boundaries=False,
+    )
     first = run_discrete_se2_rollout(
         small_experiment,
         rollout_config,
@@ -73,7 +77,14 @@ def test_selected_hidden_rollout_matches_full_rollout(small_experiment):
     )
     second = run_discrete_se2_rollout(
         small_experiment,
-        replace(rollout_config, seed=2),
+        DiscreteSE2RolloutConfig(
+            steps=rollout_config.steps,
+            seed=2,
+            margin=rollout_config.margin,
+            start_xy=rollout_config.start_xy,
+            arrow_stride=rollout_config.arrow_stride,
+            snapshot_steps=rollout_config.snapshot_steps,
+        ),
         motion,
     )
     sequences = np.stack([first.sequence, second.sequence])
@@ -119,16 +130,18 @@ def test_occupancy_normalization_masks_sparse_bins():
     assert np.isnan(normalized[1, 0]).all()
 
 
-def test_exhaustive_tuning_matches_direct_factorization_average(small_experiment):
+def test_one_step_tuning_matches_direct_factorization_average(small_experiment):
     selected = np.asarray([0, 7])[::-1]  # Deliberately has a negative stride.
-    all_pairs = compute_all_pairs_tuning(
+    all_pairs = compute_one_step_tuning(
         small_experiment,
         selected,
+        small_experiment.group.elements(),
         drive_batch_size=7,
     )
-    local = compute_local_arrival_tuning(
+    local = compute_one_step_tuning(
         small_experiment,
         selected,
+        small_experiment.local_egocentric_elements,
         drive_batch_size=5,
     )
 
@@ -172,29 +185,41 @@ def test_exhaustive_tuning_matches_direct_factorization_average(small_experiment
 
 
 def test_batched_tuning_matches_single_trajectory_batches(small_experiment):
-    motion = default_c6_motion_config()
-    base = TrajectoryTuningConfig(
+    motion = NaturalisticMotionConfig(
+        stay_probability=0.05,
+        forward_probability=0.70,
+        forward_left_or_right_probability=0.115,
+        backward_left_or_right_probability=0.005,
+        backward_probability=0.01,
+        turn_probability=0.12,
+        turn_persistence=0.20,
+        wall_lookahead=3,
+        wall_avoidance_strength=2.0,
+        minimum_wall_weight=0.05,
+        periodic_boundaries=False,
+    )
+    sampling = dict(
         num_trajectories=3,
         steps_per_trajectory=9,
         burn_in_steps=1,
         seed=23,
-        min_occupancy=1,
         margin=0,
-        batch_size=1,
     )
     selected = [0, 1, 7]
 
-    sequential = compute_trajectory_tuning(
+    sequential = compute_empirical_trajectory_tuning(
         small_experiment,
         selected,
         motion_config=motion,
-        tuning_config=base,
+        **sampling,
+        batch_size=1,
     )
-    batched = compute_trajectory_tuning(
+    batched = compute_empirical_trajectory_tuning(
         small_experiment,
         selected,
         motion_config=motion,
-        tuning_config=replace(base, batch_size=3),
+        **sampling,
+        batch_size=3,
     )
 
     np.testing.assert_array_equal(
@@ -206,73 +231,3 @@ def test_batched_tuning_matches_single_trajectory_batches(small_experiment):
         sequential.pose_activity_sums,
         atol=1e-11,
     )
-
-
-def test_cache_key_changes_and_round_trip(small_experiment, tmp_path):
-    motion = default_c6_motion_config()
-    config = TrajectoryTuningConfig(
-        num_trajectories=2,
-        steps_per_trajectory=8,
-        burn_in_steps=1,
-        min_occupancy=1,
-        batch_size=2,
-    )
-    selected = [0, 1]
-    key = trajectory_tuning_cache_key(
-        small_experiment,
-        motion,
-        config,
-        selected,
-    )
-    changed = trajectory_tuning_cache_key(
-        small_experiment,
-        motion,
-        replace(config, seed=config.seed + 1),
-        selected,
-    )
-    assert key != changed
-
-    computed = load_or_compute_trajectory_tuning(
-        small_experiment,
-        selected,
-        motion_config=motion,
-        tuning_config=config,
-        cache_directory=tmp_path,
-    )
-    loaded = load_or_compute_trajectory_tuning(
-        small_experiment,
-        selected,
-        motion_config=motion,
-        tuning_config=config,
-        cache_directory=tmp_path,
-    )
-
-    assert computed.cache_hit is False
-    assert loaded.cache_hit is True
-    np.testing.assert_allclose(
-        loaded.pose_activity_sums,
-        computed.pose_activity_sums,
-    )
-    np.testing.assert_array_equal(
-        loaded.pose_occupancy,
-        computed.pose_occupancy,
-    )
-
-
-def test_disabling_cache_never_writes_artifact(small_experiment, tmp_path):
-    result = load_or_compute_trajectory_tuning(
-        small_experiment,
-        [0],
-        motion_config=default_c6_motion_config(),
-        tuning_config=TrajectoryTuningConfig(
-            num_trajectories=1,
-            steps_per_trajectory=4,
-            burn_in_steps=1,
-            min_occupancy=1,
-        ),
-        cache_directory=tmp_path,
-        use_cache=False,
-    )
-
-    assert result.cache_path is None
-    assert not list(tmp_path.iterdir())

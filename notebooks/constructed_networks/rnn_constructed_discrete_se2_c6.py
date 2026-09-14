@@ -39,16 +39,18 @@ from src.experiments.discrete_se2 import (  # noqa: E402
     build_discrete_se2_experiment,
     run_discrete_se2_rollout,
 )
-from src.geometry.discrete_se2 import (  # noqa: E402
-    NaturalisticMotionConfig,
+from src.geometry.discrete_se2.core import (  # noqa: E402
     lattice_coordinates,
     lattice_path_coordinates,
     lattice_path_segments,
+)
+from src.geometry.discrete_se2.plotting import (  # noqa: E402
     linked_plotly_html,
     plot_lattice_scalar,
     plotly_heading_stacks,
 )
-from src.groups import as_action_group  # noqa: E402
+from src.geometry.discrete_se2.trajectories import NaturalisticMotionConfig  # noqa: E402
+from src.groups.opposite import as_action_group  # noqa: E402
 
 np.set_printoptions(precision=3, suppress=True)
 
@@ -210,9 +212,9 @@ left_signals = [
 ]
 right_signals = [
     x_allo,
-    right_group.right_action(g_x, x_allo),
-    right_group.right_action(g_y, x_allo),
-    right_group.right_action(g_rotation, x_allo),
+    right_group.left_action(g_x, x_allo),
+    right_group.left_action(g_y, x_allo),
+    right_group.left_action(g_rotation, x_allo),
 ]
 action_titles = [
     "Original x<sub>allo</sub>",

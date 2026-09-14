@@ -4,7 +4,9 @@ import numpy as np
 import pytest
 
 from src import template
-from src.groups import DiscreteSE3Group, LazyIrreducibleRepresentation, make_group
+from src.groups.factory import make_group
+from src.groups.irrep import LazyIrreducibleRepresentation
+from src.groups.znxznxzn_oh import DiscreteSE3Group
 
 
 def _identity(group: DiscreteSE3Group) -> int:

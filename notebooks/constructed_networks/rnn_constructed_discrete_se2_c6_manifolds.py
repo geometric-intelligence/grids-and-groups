@@ -30,11 +30,7 @@ project_root = next(
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from src.experiments.discrete_se2 import (  # noqa: E402
-    DiscreteSE2ExperimentConfig,
-    DiscreteSE2ManifoldConfig,
-    build_discrete_se2_experiment,
-)
+from src.experiments.discrete_se2 import DiscreteSE2ExperimentConfig, build_discrete_se2_experiment  # noqa: E402
 from src.neural_manifold import (  # noqa: E402
     analyze_module_orbits,
     build_module_orbits,
@@ -49,8 +45,7 @@ from src.neural_manifold import (  # noqa: E402
 # drive. It is inexpensive relative to trajectory pooling and is reconstructed
 # locally so this notebook has no dependency on another notebook's kernel state.
 #
-# Every experimental and computational choice is listed in the next cell. The
-# dataclasses only validate and package these visible values.
+# Every experimental and computational choice is listed in the next cell.
 
 # %%
 # ----------------------------
@@ -118,16 +113,6 @@ experiment_config = DiscreteSE2ExperimentConfig(
     amplitude_multipliers=amplitude_multipliers,
     materialize_mix=materialize_recurrent_matrix,
 )
-manifold_config = DiscreteSE2ManifoldConfig(
-    num_modules=num_modules_to_analyze,
-    spatial_samples=spatial_samples_per_axis,
-    fixed_point_tolerance=fixed_point_tolerance,
-    fixed_point_max_iterations=fixed_point_max_iterations,
-    max_persistence_points=max_persistence_points,
-    max_homology_dimension=max_homology_dimension,
-    random_seed=manifold_random_seed,
-    umap_components=umap_components,
-)
 experiment = build_discrete_se2_experiment(experiment_config)
 G = experiment.group
 params = experiment.model
@@ -137,7 +122,7 @@ static_hidden = (
 
 print(f"|G|: {G.order}")
 print(f"hidden width: {params.hidden_dim:,}")
-print("manifold configuration:", manifold_config)
+print("manifold configuration is listed above.")
 
 # %% [markdown]
 # ## 2. Fixed-point pose sample
@@ -152,7 +137,7 @@ sample_coordinates_1d = np.unique(
     np.linspace(
         0,
         G.n - 1,
-        manifold_config.spatial_samples,
+        spatial_samples_per_axis,
         dtype=int,
     )
 )
@@ -175,8 +160,8 @@ pose_initial_hidden = static_hidden[pose_elements]
 pose_fixed = fixed_point_embedding(
     params,
     pose_initial_hidden,
-    tolerance=manifold_config.fixed_point_tolerance,
-    max_iterations=manifold_config.fixed_point_max_iterations,
+    tolerance=fixed_point_tolerance,
+    max_iterations=fixed_point_max_iterations,
 )
 print(
     "identity-update fixed points: "
@@ -207,16 +192,16 @@ module_orbits = sorted(
         -sum(power[index] for index in module.irrep_indices),
         module.irrep_indices,
     ),
-)[: manifold_config.num_modules]
+)[: num_modules_to_analyze]
 manifold_analyses = analyze_module_orbits(
     module_orbits,
     max_persistence_points=min(
-        manifold_config.max_persistence_points,
+        max_persistence_points,
         len(pose_coordinates),
     ),
-    max_homology_dimension=manifold_config.max_homology_dimension,
-    random_state=manifold_config.random_seed,
-    umap_components=manifold_config.umap_components,
+    max_homology_dimension=max_homology_dimension,
+    random_state=manifold_random_seed,
+    umap_components=umap_components,
 )
 
 x_colors = plt.get_cmap("viridis")(

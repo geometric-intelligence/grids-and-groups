@@ -4,7 +4,8 @@ import numpy as np
 
 import src.template as template
 import trained_networks.viz as viz
-from src.groups import DihedralGroup, OctahedralGroup
+from src.groups.dn import DihedralGroup
+from src.groups.oh import OctahedralGroup
 
 
 class TestTopkTemplateFreqs:

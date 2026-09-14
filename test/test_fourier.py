@@ -1,7 +1,7 @@
 import numpy as np
 
 import src.template as template
-from src.groups import OctahedralGroup
+from src.groups.oh import OctahedralGroup
 
 
 def test_group_fourier_inverse_is_identity():

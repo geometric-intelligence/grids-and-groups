@@ -6,11 +6,9 @@ import numpy as np
 import pytest
 
 from src import template
-from src.groups import (
-    DiscreteSE3A4Group,
-    LazyIrreducibleRepresentation,
-    make_group,
-)
+from src.groups.factory import make_group
+from src.groups.irrep import LazyIrreducibleRepresentation
+from src.groups.znxznxzn_a4 import DiscreteSE3A4Group
 from src.groups.znxznxzn_a4 import _element_orders
 
 _TETRAHEDRON_VERTICES = {
