@@ -17,6 +17,7 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from IPython.display import display
 from matplotlib.collections import LineCollection
 
 project_root = next(folder for folder in (Path.cwd(), *Path.cwd().parents) if (folder / "src").is_dir())
@@ -283,6 +284,7 @@ for column, (ax, unit) in enumerate(zip(activity_axes, representatives, strict=T
     else:
         ax.set_xlabel("time step")
 activity_axes[0].set_title("B   Hidden activity")
+display(figure_7)
 
 # %% [markdown]
 # ## Save Figure 7
