@@ -94,26 +94,27 @@ amplitude_multipliers = (1.0, 1.0, 1.0)
 materialize_recurrent_matrix = False
 
 # ----------------------------
-# Pure periodic local random walk, matching Figure 8. The seven translations
-# (stay plus six neighbours) and three relative turns are each uniform.
+# Intermediate naturalistic local-motion policy: halfway between the original
+# forward-biased policy and the less momentum-driven Figure 7 variant. Walls
+# are avoided, unlike the periodic random walks used for Figure 8 tuning.
 # ----------------------------
-stay_probability = 1 / 7
-forward_probability = 1 / 7
-forward_left_or_right_probability = 1 / 7
-backward_left_or_right_probability = 1 / 7
-backward_probability = 1 / 7
-turn_probability = 1 / 3
-turn_persistence = 0
-wall_lookahead = 1
-wall_avoidance_strength = 0
-minimum_wall_weight = 1
+stay_probability = 0.05
+forward_probability = 0.625
+forward_left_or_right_probability = 0.1175
+backward_left_or_right_probability = 0.0125
+backward_probability = 0.065
+turn_probability = 0.12
+turn_persistence = 0.275
+wall_lookahead = 3
+wall_avoidance_strength = 2.0
+minimum_wall_weight = 0.05
 
 # ----------------------------
 # Primary rollout
 # ----------------------------
 num_rollout_steps = 100
-rollout_seed = 31
-rollout_margin = 0  # Required for the periodic Figure 8 random walk.
+rollout_seed = 3  # Chosen for the Figure 7 trajectory display.
+rollout_margin = 1
 rollout_start_xy = (n_spatial // 2, n_spatial // 2)
 
 # ----------------------------
@@ -153,7 +154,7 @@ motion_config = NaturalisticMotionConfig(
     wall_lookahead=wall_lookahead,
     wall_avoidance_strength=wall_avoidance_strength,
     minimum_wall_weight=minimum_wall_weight,
-    periodic_boundaries=True,
+    periodic_boundaries=False,
 )
 rollout_config = DiscreteSE2RolloutConfig(
     steps=num_rollout_steps,
@@ -260,13 +261,12 @@ display(
 )
 
 # %% [markdown]
-# ## 3. Pure periodic random-walk policy
+# ## 3. Intermediate naturalistic local motion policy
 #
-# This is the Figure 8 motion distribution: at every step, choose one of the
-# seven local translations (stay plus six neighbours) and one of the three
-# relative turns independently and uniformly. Thus every one of the
-# $7\times3=21$ local egocentric actions has probability $1/21$. There is no
-# momentum, wall avoidance, or turn persistence; the spatial domain is periodic.
+# Figure 7 uses the same 21 possible local actions, but assigns more mass to
+# forward motion, persists in the previous turn direction, and downweights
+# motions that would approach the display boundary. The Figure 8 tuning
+# trajectories remain the separate uniform periodic random walks.
 
 # %%
 print("motion configuration:", motion_config)
@@ -284,7 +284,7 @@ support_figure = plotly_heading_stacks(
 display(HTML(linked_plotly_html(support_figure)))
 
 # %% [markdown]
-# ## 4. Pure random-walk rollout
+# ## 4. Momentum-like local rollout
 #
 # This is the only cell to rerun after changing the motion or rollout
 # configuration. It constructs the trajectory, evaluates the network, decodes
@@ -431,10 +431,9 @@ plt.show()
 # %% [markdown]
 # ## 5. Paper Figure 7 draft
 #
-# The paper layout overlays the true and decoded paths in the wrapped rectangular
-# chart of the periodic triangular lattice.  The background uses the same
-# wrapped offset hex-grid renderer as the Figure 8 tuning curves. Lines are split at chart seams, so
-# the cut-and-paste display never introduces a false long trajectory segment.
+# The paper layout overlays the true and decoded paths on a light triangular
+# lattice. Lines are split at chart seams, so the cut-and-paste display never
+# introduces a false long trajectory segment.
 # The lower-left panel summarizes decoding accuracy, while the right column shows
 # one high-variance neuron from each of eight translation-sensitive irreps.
 
@@ -477,6 +476,8 @@ figure_7_activity = (figure_7_activity - activity_minimum) / np.where(
     activity_span,
     1,
 )
+spatial_accuracy = np.isclose(rollout.center_errors, 0, atol=1e-10)
+orientation_accuracy = np.isclose(rollout.orientation_errors, 0, atol=1e-10)
 
 
 def time_colored_path(points, n, *, colormap, normalization):
@@ -511,19 +512,26 @@ steps = np.arange(1, len(rollout.exact_centers) + 1)
 time_normalization = mcolors.Normalize(vmin=steps[0], vmax=steps[-1])
 time_colormap = plt.colormaps["viridis"]
 
+# The dynamics live on a torus, so the rectangular plotting chart can be cut
+# anywhere. This cut keeps the chosen seed-3 trajectory in one continuous
+# piece; it changes only the display coordinates, not the trajectory itself.
+trajectory_display_shift = np.array((3, 0))
+exact_display_centers = (rollout.exact_centers - trajectory_display_shift) % G.n
+predicted_display_centers = (rollout.predicted_centers - trajectory_display_shift) % G.n
+
 plot_lattice_scalar(
     np.zeros((G.n, G.n)),
     ax=trajectory_ax,
-    cmap=mcolors.ListedColormap(["#08192D"]),
+    cmap=mcolors.ListedColormap(["#F4F6F8"]),
     vmin=0,
     vmax=1,
     colorbar=False,
     coordinate_mode="offset",
     wrap_periodic_edges=True,
 )
-trajectory_ax.collections[-1].set(edgecolor="#4D6D8D", linewidth=0.35)
+trajectory_ax.collections[-1].set(edgecolor="#D4DAE2", linewidth=0.35)
 spatial_segments, spatial_times = time_colored_path(
-    rollout.exact_centers, G.n, colormap=time_colormap, normalization=time_normalization
+    exact_display_centers, G.n, colormap=time_colormap, normalization=time_normalization
 )
 spatial_trace = LineCollection(
     spatial_segments,
@@ -535,23 +543,23 @@ spatial_trace = LineCollection(
     zorder=2,
 )
 trajectory_ax.add_collection(spatial_trace)
-for segment in lattice_path_segments(rollout.predicted_centers, G.n, mode="offset"):
+for segment in lattice_path_segments(predicted_display_centers, G.n, mode="offset"):
     trajectory_ax.plot(
         segment[:, 0],
         segment[:, 1],
-        color="#DCE7F2",
+        color="#59636F",
         linewidth=0.8,
         linestyle=(0, (4, 2)),
         alpha=0.8,
         solid_capstyle="round",
         zorder=3,
     )
-exact_display = lattice_path_coordinates(rollout.exact_centers, G.n, mode="offset")
+exact_display = lattice_path_coordinates(exact_display_centers, G.n, mode="offset")
 trajectory_ax.scatter(
     *exact_display[0],
     s=72,
     color=time_colormap(time_normalization(steps[0])),
-    edgecolors="#EAF2FF",
+    edgecolors="#29323C",
     linewidths=0.7,
     zorder=4,
     label="start",
@@ -561,13 +569,13 @@ trajectory_ax.scatter(
     s=105,
     marker="*",
     color=time_colormap(time_normalization(steps[-1])),
-    edgecolors="#EAF2FF",
+    edgecolors="#29323C",
     linewidths=0.6,
     zorder=5,
     label="end",
 )
 trajectory_ax.plot([], [], color=time_colormap(0.7), linewidth=2.8, label="true pose (color = time)")
-trajectory_ax.plot([], [], color="#DCE7F2", linewidth=0.8, linestyle=(0, (4, 2)), label="decoded pose")
+trajectory_ax.plot([], [], color="#59636F", linewidth=0.8, linestyle=(0, (4, 2)), label="decoded pose")
 trajectory_ax.set(
     title="A   Accurate 2D path integration",
     aspect="equal",
@@ -582,9 +590,9 @@ trajectory_ax.legend(
     [labels[index] for index in legend_order],
     loc="upper right",
     frameon=True,
-    facecolor="#08192D",
-    edgecolor="#4D6D8D",
-    labelcolor="white",
+    facecolor="white",
+    edgecolor="#D4DAE2",
+    labelcolor="#29323C",
     fontsize=8,
 )
 
@@ -635,7 +643,23 @@ heading_ax.text(
 
 for column, (ax, unit) in enumerate(zip(activity_axes, figure_7_representatives)):
     metadata = params.metadata[unit]
-    ax.plot(steps, figure_7_activity[:, column], color="0.12", linewidth=1.15)
+    activity_segments = np.stack(
+        (
+            np.column_stack((steps[:-1], figure_7_activity[:-1, column])),
+            np.column_stack((steps[1:], figure_7_activity[1:, column])),
+        ),
+        axis=1,
+    )
+    ax.add_collection(
+        LineCollection(
+            activity_segments,
+            cmap=time_colormap,
+            norm=time_normalization,
+            array=steps[:-1],
+            linewidth=1.4,
+            capstyle="round",
+        )
+    )
     ax.set(
         xlim=(steps[0], steps[-1]),
         ylim=(-0.04, 1.04),

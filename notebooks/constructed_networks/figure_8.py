@@ -316,7 +316,7 @@ exact_c = compute_one_step_tuning(
 write_runtime("Panel C: " + exact_tuning_label, time.perf_counter() - started, "four reference neurons and six one-label changes each; " + exact_tuning_note)
 maps_c = {unit: exact_c.position_mean[..., column] for column, unit in enumerate(exact_c.unit_indices)}
 
-def best_translation_to_reference(reference, curve):
+def best_translation_to_reference(reference, curve, *, return_score=False):
     """Return the periodic shift that maximizes centred map correlation."""
     reference = reference - reference.mean()
     curve = curve - curve.mean()
@@ -328,7 +328,7 @@ def best_translation_to_reference(reference, curve):
             signed_shift = (dx if dx <= n // 2 else dx - n, dy if dy <= n // 2 else dy - n)
             if score > best_score + 1e-12 or (np.isclose(score, best_score) and sum(value**2 for value in signed_shift) < sum(value**2 for value in best_shift)):
                 best_score, best_shift = score, signed_shift
-    return best_shift
+    return (best_shift, best_score) if return_score else best_shift
 
 
 # k1 and k2 do not change the spatial marginal. One representative for each
@@ -420,6 +420,330 @@ def save_panel_c(maps, translation_maps, tuning_label, filename):
 
 
 save_panel_c(maps_c, translation_maps, exact_tuning_label, "figure_8_panel_c.svg")
+
+# %% [markdown]
+# ## Panel C follow-up — fixed-label sweep over all matrix indices
+#
+# A six-dimensional irrep contributes
+# $4\times q_\rho\times6^3=2{,}592$ hidden units. The 72 points in Panel C are
+# only the $4\times3\times6$ representatives obtained after fixing
+# $k_1=k_2=0$. Here we instead fix
+# $(\epsilon_1,\epsilon_2,\delta)=(+1,+1,0)$ and compute all $6^3=216$
+# choices of $(k_0,k_1,k_2)$ in each displayed irrep. This directly tests the
+# claim that $k_1$ and $k_2$ disappear after taking the spatial marginal.
+
+# %%
+k_sweep_fixed_labels = {"eps1": 1, "eps2": 1, "delta": 0}
+k_labels = ("k0", "k1", "k2")
+k_sweep_units = {
+    rho: [
+        unit
+        for unit, labels in enumerate(experiment.model.metadata)
+        if int(labels["irrep_index"]) == rho
+        and all(labels[name] == value for name, value in k_sweep_fixed_labels.items())
+    ]
+    for rho in panel_c_rhos
+}
+assert all(len(k_sweep_units[rho]) == experiment.irreps[rho].dim**3 for rho in panel_c_rhos)
+all_k_sweep_units = tuple(unit for units in k_sweep_units.values() for unit in units)
+
+started = time.perf_counter()
+k_sweep_tuning = compute_one_step_tuning(
+    experiment,
+    all_k_sweep_units,
+    exact_drive_elements,
+    drive_batch_size=8,
+)
+write_runtime(
+    "Panel C: fixed-label k sweep: " + exact_tuning_label,
+    time.perf_counter() - started,
+    "all 216 (k0,k1,k2) combinations per displayed irrep; eps1=eps2=1, delta=0; "
+    + exact_tuning_note,
+)
+k_sweep_maps = {
+    unit: k_sweep_tuning.position_mean[..., column]
+    for column, unit in enumerate(k_sweep_tuning.unit_indices)
+}
+
+
+def circular_eta_squared(categories, periodic_values, period):
+    """Variance explained by categories after embedding a periodic value on a circle."""
+    categories = np.asarray(categories)
+    angles = 2 * np.pi * np.asarray(periodic_values) / period
+    embedded = np.column_stack((np.cos(angles), np.sin(angles)))
+    total = np.sum((embedded - embedded.mean(axis=0)) ** 2)
+    within = sum(
+        np.sum((group - group.mean(axis=0)) ** 2)
+        for category in np.unique(categories)
+        for group in (embedded[categories == category],)
+    )
+    return float(1 - within / total) if total > 1e-15 else np.nan
+
+
+def irrep_spatial_scale(rho):
+    """Return the triangular-lattice Fourier radius and spatial wavelength."""
+    irrep = experiment.irreps[rho]
+    x_phases = np.angle(np.diag(irrep(experiment.group.encode(1, 0, 0))))
+    y_phases = np.angle(np.diag(irrep(experiment.group.encode(0, 1, 0))))
+    k_x = np.rint(n * x_phases / (2 * np.pi)).astype(int)
+    k_y = np.rint(n * y_phases / (2 * np.pi)).astype(int)
+    k_x = (k_x + n // 2) % n - n // 2
+    k_y = (k_y + n // 2) % n - n // 2
+    radii = np.sqrt(k_x**2 - k_x * k_y + k_y**2)
+    nonzero = radii[radii > 1e-12]
+    if nonzero.size == 0 or not np.allclose(nonzero, nonzero[0]):
+        raise ValueError(f"rho={rho} does not have one nonzero spatial frequency radius")
+    radius = float(nonzero[0])
+    return radius, n / radius
+
+
+def periodic_phase(shift, period):
+    """Map a lattice translation to its principal phase in [-pi, pi)."""
+    return (2 * np.pi * np.asarray(shift) / period + np.pi) % (2 * np.pi) - np.pi
+
+
+k_sweep_records = []
+for rho in panel_c_rhos:
+    reference_unit = unit_with_labels(rho, **k_sweep_fixed_labels)
+    reference_map = k_sweep_maps[reference_unit]
+    for unit in k_sweep_units[rho]:
+        labels = experiment.model.metadata[unit]
+        (shift_x, shift_y), alignment = best_translation_to_reference(
+            reference_map,
+            k_sweep_maps[unit],
+            return_score=True,
+        )
+        k_sweep_records.append(
+            {
+                "rho": rho,
+                "unit": unit,
+                **k_sweep_fixed_labels,
+                **{name: int(labels[name]) for name in k_labels},
+                "shift_x": shift_x,
+                "shift_y": shift_y,
+                "alignment": alignment,
+            }
+        )
+
+k_sweep_path = figures / "figure_8_panel_c_k_sweep.csv"
+with k_sweep_path.open("w", newline="") as handle:
+    writer = csv.DictWriter(handle, fieldnames=tuple(k_sweep_records[0]))
+    writer.writeheader()
+    writer.writerows(k_sweep_records)
+print(f"Saved sweep data: {k_sweep_path}")
+
+# Pearson r is included as a familiar descriptive statistic, but these labels
+# are categorical/cyclic and the shifts live on a period-n torus. Circular
+# eta-squared is therefore the more appropriate main-effect summary.
+k_sweep_associations = []
+for rho in panel_c_rhos:
+    records = [record for record in k_sweep_records if record["rho"] == rho]
+    for label in ("k0",):
+        label_values = np.asarray([record[label] for record in records])
+        for coordinate in ("shift_x", "shift_y"):
+            shift_values = np.asarray([record[coordinate] for record in records])
+            _, wavelength = irrep_spatial_scale(rho)
+            k_sweep_associations.append(
+                {
+                    "rho": rho,
+                    "label": label,
+                    "coordinate": coordinate,
+                    "pearson_r": float(np.corrcoef(label_values, shift_values)[0, 1]),
+                    "circular_eta_squared": circular_eta_squared(label_values, shift_values, wavelength),
+                }
+            )
+
+association_path = figures / "figure_8_panel_c_k_sweep_associations.csv"
+with association_path.open("w", newline="") as handle:
+    writer = csv.DictWriter(handle, fieldnames=tuple(k_sweep_associations[0]))
+    writer.writeheader()
+    writer.writerows(k_sweep_associations)
+print(f"Saved association table: {association_path}")
+
+# Direct invariance diagnostic: at fixed k0, compare every (k1,k2) curve with
+# its (k1,k2)=(0,0) counterpart after centering and unit-normalizing the maps.
+invariance_records = []
+for rho in panel_c_rhos:
+    unit_by_k = {
+        tuple(int(experiment.model.metadata[unit][name]) for name in k_labels): unit
+        for unit in k_sweep_units[rho]
+    }
+    errors = []
+    for (k0, k1, k2), unit in unit_by_k.items():
+        reference = k_sweep_maps[unit_by_k[(k0, 0, 0)]]
+        curve = k_sweep_maps[unit]
+        reference = reference - reference.mean()
+        curve = curve - curve.mean()
+        reference /= max(np.linalg.norm(reference), 1e-15)
+        curve /= max(np.linalg.norm(curve), 1e-15)
+        errors.append(float(np.linalg.norm(curve - reference)))
+    invariance_records.append(
+        {
+            "rho": rho,
+            "irrep_dim": experiment.irreps[rho].dim,
+            "spatial_frequency_radius": irrep_spatial_scale(rho)[0],
+            "spatial_wavelength": irrep_spatial_scale(rho)[1],
+            "maximum_normalized_shape_error_across_k1_k2": max(errors),
+        }
+    )
+
+invariance_path = figures / "figure_8_panel_c_k_sweep_invariance.csv"
+with invariance_path.open("w", newline="") as handle:
+    writer = csv.DictWriter(handle, fieldnames=tuple(invariance_records[0]))
+    writer.writeheader()
+    writer.writerows(invariance_records)
+print(f"Saved invariance diagnostic: {invariance_path}")
+
+# Focus on k0 and delta after fixing eps1=eps2=+1 and k1=k2=0. These 18 maps
+# per irrep are already present in translation_maps, so no extra tuning pass is
+# needed. Phase is horizontal because it is the circular variable; small
+# vertical offsets separate the three delta values without changing k0.
+k0_delta_records = []
+for rho in panel_c_rhos:
+    reference_unit = unit_with_labels(rho)
+    reference_map = translation_maps[reference_unit]
+    for unit in translation_units[rho]:
+        labels = experiment.model.metadata[unit]
+        if labels["eps1"] != 1 or labels["eps2"] != 1:
+            continue
+        (shift_x, shift_y), alignment = best_translation_to_reference(
+            reference_map,
+            translation_maps[unit],
+            return_score=True,
+        )
+        k0_delta_records.append(
+            {
+                "rho": rho,
+                "unit": unit,
+                "eps1": 1,
+                "eps2": 1,
+                "delta": int(labels["delta"]),
+                "k0": int(labels["k0"]),
+                "k1": 0,
+                "k2": 0,
+                "shift_x": shift_x,
+                "shift_y": shift_y,
+                "alignment": alignment,
+            }
+        )
+
+k0_delta_path = figures / "figure_8_panel_c_k0_delta_sweep.csv"
+with k0_delta_path.open("w", newline="") as handle:
+    writer = csv.DictWriter(handle, fieldnames=tuple(k0_delta_records[0]))
+    writer.writeheader()
+    writer.writerows(k0_delta_records)
+print(f"Saved k0/delta sweep: {k0_delta_path}")
+
+
+def categorical_design(values):
+    """Treatment-coded design matrix without an intercept column."""
+    values = np.asarray(values)
+    categories = np.unique(values)
+    return np.column_stack([values == category for category in categories[1:]]).astype(float)
+
+
+def multivariate_r_squared(response, design):
+    """Fraction of total multivariate sum of squares explained by a design."""
+    response = np.asarray(response, dtype=float)
+    design = np.column_stack((np.ones(len(response)), np.asarray(design, dtype=float)))
+    prediction = design @ np.linalg.lstsq(design, response, rcond=None)[0]
+    total = np.sum((response - response.mean(axis=0)) ** 2)
+    residual = np.sum((response - prediction) ** 2)
+    return float(1 - residual / total) if total > 1e-15 else np.nan
+
+
+k0_delta_effects = []
+for rho in panel_c_rhos:
+    records = [record for record in k0_delta_records if record["rho"] == rho]
+    k0_values = np.asarray([record["k0"] for record in records])
+    delta_values = np.asarray([record["delta"] for record in records])
+    k0_design = categorical_design(k0_values)
+    delta_design = categorical_design(delta_values)
+    additive_design = np.column_stack((k0_design, delta_design))
+    _, wavelength = irrep_spatial_scale(rho)
+    for coordinate in ("shift_x", "shift_y"):
+        shifts = np.asarray([record[coordinate] for record in records])
+        phases = periodic_phase(shifts, wavelength)
+        response = np.column_stack((np.cos(phases), np.sin(phases)))
+        k0_delta_effects.append(
+            {
+                "rho": rho,
+                "coordinate": coordinate,
+                "k0_r_squared": multivariate_r_squared(response, k0_design),
+                "delta_r_squared": multivariate_r_squared(response, delta_design),
+                "additive_k0_delta_r_squared": multivariate_r_squared(response, additive_design),
+            }
+        )
+
+k0_delta_effect_path = figures / "figure_8_panel_c_k0_delta_effects.csv"
+with k0_delta_effect_path.open("w", newline="") as handle:
+    writer = csv.DictWriter(handle, fieldnames=tuple(k0_delta_effects[0]))
+    writer.writeheader()
+    writer.writerows(k0_delta_effects)
+print(f"Saved k0/delta effect table: {k0_delta_effect_path}")
+
+delta_colours = ("#0072B2", "#E69F00", "#009E73")
+delta_markers = ("o", "s", "^")
+delta_offsets = (-0.16, 0.0, 0.16)
+figure, axes = plt.subplots(4, 2, figsize=(8.2, 10.5), sharex=True, sharey=False, squeeze=False)
+figure.subplots_adjust(left=0.12, right=0.985, bottom=0.10, top=0.875, wspace=0.13, hspace=0.20)
+for row, rho in enumerate(panel_c_rhos):
+    records = [record for record in k0_delta_records if record["rho"] == rho]
+    irrep_dim = experiment.irreps[rho].dim
+    _, wavelength = irrep_spatial_scale(rho)
+    for column, coordinate in enumerate(("shift_x", "shift_y")):
+        axis = axes[row, column]
+        for delta, (colour, marker, offset) in enumerate(
+            zip(delta_colours, delta_markers, delta_offsets, strict=True)
+        ):
+            subset = sorted(
+                (record for record in records if record["delta"] == delta),
+                key=lambda record: record["k0"],
+            )
+            shifts = np.asarray([record[coordinate] for record in subset])
+            phases = periodic_phase(shifts, wavelength)
+            k0_values = np.asarray([record["k0"] for record in subset])
+            axis.scatter(phases, k0_values + offset, s=35, color=colour, marker=marker,
+                         edgecolors="white", linewidths=0.45, label=rf"$\delta={delta}$", zorder=2)
+        axis.axvline(-np.pi, color="0.65", linewidth=0.7, linestyle="--", zorder=0)
+        axis.axvline(0, color="0.78", linewidth=0.7, zorder=0)
+        axis.axvline(np.pi, color="0.65", linewidth=0.7, linestyle="--", zorder=0)
+        axis.set(xlim=(-np.pi, np.pi), xticks=(-np.pi, 0, np.pi),
+                 xticklabels=(r"$-\pi$", "$0$", r"$\pi$"),
+                 ylim=(-0.5, irrep_dim - 0.5), yticks=range(irrep_dim))
+        if row == 0:
+            axis.set_title((r"$\Delta_x$ phase" if coordinate == "shift_x" else r"$\Delta_y$ phase"),
+                           fontsize=11, fontweight="bold")
+        if column == 0:
+            axis.set_ylabel(rf"$\rho={rho},\ d_\rho={irrep_dim}$" + "\n$k_0$", fontsize=9)
+        if row == len(panel_c_rhos) - 1:
+            axis.set_xlabel("translation phase")
+axes[0, -1].legend(loc="upper right", frameon=False, fontsize=8)
+figure.suptitle(
+    r"Translation phase versus $k_0$, coloured by $\delta$",
+    fontsize=13,
+    fontweight="bold",
+    y=0.965,
+)
+scale_note = ", ".join(
+    rf"$\lambda_{{{rho}}}={irrep_spatial_scale(rho)[1]:.2f}$"
+    for rho in panel_c_rhos
+)
+figure.text(0.5, 0.915, "Spatial wavelengths: " + scale_note,
+            ha="center", fontsize=9, color="0.35")
+figure.text(
+    0.5,
+    0.025,
+    rf"{exact_tuning_label}; $\epsilon_1=\epsilon_2=+1$ and $k_1=k_2=0$; marker offsets are visual only",
+    ha="center",
+    fontsize=8.5,
+)
+k0_delta_figure_path = figures / "figure_8_panel_c_k0_delta_scatter.svg"
+figure.savefig(k0_delta_figure_path, bbox_inches="tight")
+k0_delta_png_path = figures / "figure_8_panel_c_k0_delta_scatter.png"
+figure.savefig(k0_delta_png_path, dpi=180, bbox_inches="tight")
+plt.close(figure)
+print(f"Saved scatterplots: {k0_delta_figure_path} and {k0_delta_png_path}")
 
 # %% [markdown]
 # ## Panel D — representative spatial, orientation, and conjunctive tuning
