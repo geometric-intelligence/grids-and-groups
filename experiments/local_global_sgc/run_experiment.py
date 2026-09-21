@@ -42,6 +42,7 @@ class ExperimentConfig:
     eval_batch_size: int
     eval_interval: int
     grad_clip: float
+    supervision_stride: int
     device: str
 
 
@@ -153,6 +154,20 @@ def make_fixed_eval_sequences(
     )
 
 
+def supervised_output_indices(num_outputs: int, stride: int) -> list[int]:
+    """Return zero-based output indices observed by the training loss.
+
+    The final output is always supervised, even when ``stride`` does not divide
+    the number of recurrent updates.
+    """
+    if stride < 1:
+        raise ValueError("supervision_stride must be positive")
+    indices = list(range(stride - 1, num_outputs, stride))
+    if num_outputs - 1 not in indices:
+        indices.append(num_outputs - 1)
+    return sorted(set(indices))
+
+
 @torch.no_grad()
 def evaluate(
     network: nn.Module,
@@ -160,25 +175,56 @@ def evaluate(
     codebook: torch.Tensor,
     cayley: torch.Tensor,
     batch_size: int,
-) -> tuple[float, float]:
+    supervision_stride: int,
+) -> dict[str, float]:
     network.eval()
-    squared_error = 0.0
-    num_values = 0
-    num_correct = 0
-    num_outputs = 0
+    totals = {
+        "dense_squared_error": 0.0,
+        "dense_num_values": 0,
+        "dense_num_correct": 0,
+        "dense_num_outputs": 0,
+        "checkpoint_squared_error": 0.0,
+        "checkpoint_num_values": 0,
+        "checkpoint_num_correct": 0,
+        "checkpoint_num_outputs": 0,
+        "final_squared_error": 0.0,
+        "final_num_values": 0,
+        "final_num_correct": 0,
+        "final_num_outputs": 0,
+    }
     for start in range(0, len(sequences), batch_size):
         batch_sequence = sequences[start : start + batch_size]
         inputs, targets, target_indices = encode_sequences(batch_sequence, codebook, cayley)
         predictions = network(inputs)
-        squared_error += torch.sum((predictions - targets) ** 2).item()
-        num_values += targets.numel()
-
-        flat_predictions = predictions.reshape(-1, predictions.shape[-1])
-        decoded = torch.argmax(flat_predictions @ codebook.T, dim=1)
-        flat_targets = target_indices.reshape(-1)
-        num_correct += torch.sum(decoded == flat_targets).item()
-        num_outputs += flat_targets.numel()
-    return squared_error / num_values, num_correct / num_outputs
+        checkpoint_indices = supervised_output_indices(
+            predictions.shape[1], supervision_stride
+        )
+        views = {
+            "dense": (predictions, targets, target_indices),
+            "checkpoint": (
+                predictions[:, checkpoint_indices],
+                targets[:, checkpoint_indices],
+                target_indices[:, checkpoint_indices],
+            ),
+            "final": (predictions[:, -1:], targets[:, -1:], target_indices[:, -1:]),
+        }
+        for name, (view_predictions, view_targets, view_target_indices) in views.items():
+            totals[f"{name}_squared_error"] += torch.sum(
+                (view_predictions - view_targets) ** 2
+            ).item()
+            totals[f"{name}_num_values"] += view_targets.numel()
+            flat_predictions = view_predictions.reshape(-1, view_predictions.shape[-1])
+            decoded = torch.argmax(flat_predictions @ codebook.T, dim=1)
+            flat_targets = view_target_indices.reshape(-1)
+            totals[f"{name}_num_correct"] += torch.sum(decoded == flat_targets).item()
+            totals[f"{name}_num_outputs"] += flat_targets.numel()
+    return {
+        f"{name}_mse": totals[f"{name}_squared_error"] / totals[f"{name}_num_values"]
+        for name in ("dense", "checkpoint", "final")
+    } | {
+        f"{name}_accuracy": totals[f"{name}_num_correct"] / totals[f"{name}_num_outputs"]
+        for name in ("dense", "checkpoint", "final")
+    }
 
 
 def write_metrics(path: Path, rows: list[dict[str, float | int]]) -> None:
@@ -190,6 +236,14 @@ def write_metrics(path: Path, rows: list[dict[str, float | int]]) -> None:
         "global_mse",
         "local_accuracy",
         "global_accuracy",
+        "local_checkpoint_mse",
+        "global_checkpoint_mse",
+        "local_checkpoint_accuracy",
+        "global_checkpoint_accuracy",
+        "local_final_mse",
+        "global_final_mse",
+        "local_final_accuracy",
+        "global_final_accuracy",
     ]
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -227,6 +281,8 @@ def run(config: ExperimentConfig, output_dir: Path) -> None:
         raise ValueError("this pilot intentionally uses the existing C6 local-motion definition")
     if config.sequence_length < 2:
         raise ValueError("sequence_length must be at least 2")
+    if config.supervision_stride < 1:
+        raise ValueError("supervision_stride must be positive")
 
     output_dir.mkdir(parents=True, exist_ok=False)
     random.seed(config.seed)
@@ -250,7 +306,11 @@ def run(config: ExperimentConfig, output_dir: Path) -> None:
             "local_support_size": len(local_elements_list),
             "local_elements": local_elements_list,
             "local_elements_decoded": [group.decode(g) for g in local_elements_list],
-            "supervision": "all_prefixes",
+            "supervision": "periodic_prefixes_with_final",
+            "supervision_stride": config.supervision_stride,
+            "supervised_output_indices": supervised_output_indices(
+                config.sequence_length - 1, config.supervision_stride
+            ),
             "action_side": "right",
         }
     )
@@ -293,27 +353,45 @@ def run(config: ExperimentConfig, output_dir: Path) -> None:
 
     for step in range(config.steps + 1):
         if step in evaluation_steps:
-            local_mse, local_accuracy = evaluate(
-                network, local_eval, codebook, cayley, config.eval_batch_size
+            local_metrics = evaluate(
+                network,
+                local_eval,
+                codebook,
+                cayley,
+                config.eval_batch_size,
+                config.supervision_stride,
             )
-            global_mse, global_accuracy = evaluate(
-                network, global_eval, codebook, cayley, config.eval_batch_size
+            global_metrics = evaluate(
+                network,
+                global_eval,
+                codebook,
+                cayley,
+                config.eval_batch_size,
+                config.supervision_stride,
             )
             row = {
                 "step": step,
                 "elapsed_seconds": time.time() - start_time,
                 "train_batch_mse": train_batch_mse,
-                "local_mse": local_mse,
-                "global_mse": global_mse,
-                "local_accuracy": local_accuracy,
-                "global_accuracy": global_accuracy,
+                "local_mse": local_metrics["dense_mse"],
+                "global_mse": global_metrics["dense_mse"],
+                "local_accuracy": local_metrics["dense_accuracy"],
+                "global_accuracy": global_metrics["dense_accuracy"],
+                "local_checkpoint_mse": local_metrics["checkpoint_mse"],
+                "global_checkpoint_mse": global_metrics["checkpoint_mse"],
+                "local_checkpoint_accuracy": local_metrics["checkpoint_accuracy"],
+                "global_checkpoint_accuracy": global_metrics["checkpoint_accuracy"],
+                "local_final_mse": local_metrics["final_mse"],
+                "global_final_mse": global_metrics["final_mse"],
+                "local_final_accuracy": local_metrics["final_accuracy"],
+                "global_final_accuracy": global_metrics["final_accuracy"],
             }
             rows.append(row)
             write_metrics(output_dir / "metrics.csv", rows)
             print(
                 f"step={step:6d} train={train_batch_mse:.6g} "
-                f"local={local_mse:.6g}/{local_accuracy:.3f} "
-                f"global={global_mse:.6g}/{global_accuracy:.3f}",
+                f"local={local_metrics['dense_mse']:.6g}/{local_metrics['dense_accuracy']:.3f} "
+                f"global={global_metrics['dense_mse']:.6g}/{global_metrics['dense_accuracy']:.3f}",
                 flush=True,
             )
         if step == config.steps:
@@ -332,7 +410,12 @@ def run(config: ExperimentConfig, output_dir: Path) -> None:
         inputs, targets, _ = encode_sequences(sequence, codebook, cayley)
         optimizer.zero_grad(set_to_none=True)
         predictions = network(inputs)
-        loss = torch.mean((predictions - targets) ** 2)
+        supervised_indices = supervised_output_indices(
+            predictions.shape[1], config.supervision_stride
+        )
+        loss = torch.mean(
+            (predictions[:, supervised_indices] - targets[:, supervised_indices]) ** 2
+        )
         loss.backward()
         if config.grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(network.parameters(), config.grad_clip)
@@ -369,6 +452,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-batch-size", type=int, default=1_024)
     parser.add_argument("--eval-interval", type=int, default=100)
     parser.add_argument("--grad-clip", type=float, default=1.0)
+    parser.add_argument("--supervision-stride", type=int, default=1)
     parser.add_argument("--validate-only", action="store_true")
     return parser.parse_args()
 
@@ -394,6 +478,7 @@ def main() -> None:
         eval_batch_size=args.eval_batch_size,
         eval_interval=args.eval_interval,
         grad_clip=args.grad_clip,
+        supervision_stride=args.supervision_stride,
         device=args.device,
     )
     run(config, args.output_dir)

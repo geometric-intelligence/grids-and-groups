@@ -21,6 +21,10 @@ Each run writes `config.json`, `metrics.csv`, and `final_model.pt` to its own
 output directory. `metrics.csv` contains the held-out local and global MSE and
 exact decoded-product accuracy at every evaluation checkpoint.
 
+`--supervision-stride L` applies the training loss every `L` recurrent updates
+and always at the final update. Evaluation still records dense all-prefix,
+supervised-checkpoint, and final-step metrics separately.
+
 Example:
 
 ```bash
