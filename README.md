@@ -57,14 +57,12 @@ The closed-form construction decomposes the computation into modules indexed by 
 
 ### Navigation groups
 
-| Group | Interpretation | Status |
-| --- | --- | --- |
-| $C_n$ | Circular variable or head direction | Training infrastructure |
-| $C_n\times C_m$ | Periodic planar translations | Trained sequential notebook |
-| $\mathbb Z_n^2\rtimes C_m$ | Discrete planar rigid motion (Discrete SE(2)) | Trained and constructed notebooks |
-| $\mathbb Z_n^3\rtimes O$ | Discrete volumetric motion with 24 proper cubic rotations (Discrete SE(3)) | Constructed notebook |
-
-The general training stack also includes cyclic, product-cyclic, dihedral, octahedral, and icosahedral benchmark groups.
+| Group | Interpretation |
+| --- | --- |
+| $C_n$ | Circular variable or head direction | 
+| $C_n\times C_m$ | Periodic planar translations | 
+| $\mathbb Z_n^2\rtimes C_m$ | Discrete planar rigid motion (Discrete SE(2)) | 
+| $\mathbb Z_n^3\rtimes O$ | Discrete volumetric motion with 24 proper cubic rotations (Discrete SE(3)) | 
 
 
 ## Installation
