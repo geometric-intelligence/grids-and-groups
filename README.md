@@ -3,7 +3,6 @@
 <h3 align="center">Exact and learned recurrent networks for path integration over finite groups</h3>
 
 <p align="center">
-  <a href="https://github.com/geometric-intelligence/grids-and-groups/actions/workflows/ci.yml"><img src="https://github.com/geometric-intelligence/grids-and-groups/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.python.org/downloads/release/python-3120/"><img src="https://img.shields.io/badge/Python-3.12-blue.svg" alt="Python 3.12"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
 </p>
