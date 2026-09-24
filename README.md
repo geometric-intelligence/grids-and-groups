@@ -76,7 +76,7 @@ The general training stack also includes cyclic, product-cyclic, dihedral, octah
 ### Setup
 
 ```bash
-git clone git@github.com:geometric-intelligence/grids-and-groups.git
+git clone [anonymous/grids-and-groups]
 cd grids-and-groups
 
 conda env create -f conda.yaml
