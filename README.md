@@ -10,7 +10,7 @@
 <p align="center">
   <a href="#overview">Overview</a> &bull;
   <a href="#installation">Install</a> &bull;
-  <a href="#notebooks">Notebooks</a> &bull;
+  <a href="#notebooks">Notebooks</a> 
 </p>
 
 ---
