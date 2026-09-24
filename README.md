@@ -16,10 +16,6 @@
   <a href="#testing">Testing</a>
 </p>
 
-<p align="center">
-  <b>Daniel Kunin &middot; Christopher J. Kymn &middot; Francisco Acosta &middot; Giovanni Luca Marchetti &middot; Nina Miolane</b>
-</p>
-
 ---
 
 > **How can a recurrent neural circuit integrate a sequence of local, egocentric movements into a global, allocentric representation of position and orientation?**
