@@ -1,6 +1,6 @@
 <h1 align="center">The Algebra of Spatial Navigation</h1>
 
-<h3 align="center">Exact and learned recurrent networks for path integration over finite groups</h3>
+<h3 align="center">Recurrent networks for path integration over finite groups</h3>
 
 <p align="center">
   <a href="https://www.python.org/downloads/release/python-3120/"><img src="https://img.shields.io/badge/Python-3.12-blue.svg" alt="Python 3.12"></a>
