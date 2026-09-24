@@ -22,12 +22,12 @@
 This repository studies path integration as **sequential group composition**. A recurrent network receives an allocentric population code together with egocentric transformations and must maintain the allocentric code of their cumulative product:
 
 $$
-\left(x_{\mathrm{allo}},\; g_1\!\cdot x_{\mathrm{ego}},\ldots,g_T\!\cdot x_{\mathrm{ego}}\right)
+\left(x_{\mathrm{allo}},\; g_1 \cdot x_{\mathrm{ego}},\ldots,g_T \cdot x_{\mathrm{ego}}\right)
 \longmapsto
-(g_T\cdots g_1)\!\cdot x_{\mathrm{allo}}.
+(g_T\cdots g_1) \cdot x_{\mathrm{allo}}.
 $$
 
-The group \(G\) specifies the geometry of the navigated space. Circular groups model head direction, product groups model periodic translations, and semidirect products model coupled rotations and translations in two and three dimensions.
+The group $G$ specifies the geometry of the navigated space. Circular groups model head direction, product groups model periodic translations, and semidirect products model coupled rotations and translations in two and three dimensions.
 
 The repository supports two complementary approaches:
 
@@ -38,27 +38,27 @@ The repository supports two complementary approaches:
 
 ### Algebraic formulation
 
-For a finite group \(G\), an encoding \(x\in\mathbb R^{|G|}\) is equivalently a scalar function \(x:G\to\mathbb R\). Group elements act by permuting its coordinates through the regular action.
+For a finite group $G$, an encoding $x\in\mathbb R^{|G|}$ is equivalently a scalar function $x:G\to\mathbb R$. Group elements act by permuting its coordinates through the regular action.
 
 The recurrent model uses a squared-ReLU activation,
 
 $$
-\sigma(z)=\operatorname{ReLU}(z)^2,
+\sigma(z)=\mathrm{ReLU}(z)^2,
 $$
 
 and updates
 
 $$
 \begin{aligned}
-h_1 &= \sigma\!\left(W_{\mathrm{in}}x_{\mathrm{allo}}
-      +W_{\mathrm{drive}}(g_1\!\cdot x_{\mathrm{ego}})\right),\\
-h_t &= \sigma\!\left(W_{\mathrm{mix}}h_{t-1}
-      +W_{\mathrm{drive}}(g_t\!\cdot x_{\mathrm{ego}})\right),\\
+h_1 &= \sigma \left(W_{\mathrm{in}}x_{\mathrm{allo}}
+      +W_{\mathrm{drive}}(g_1 \cdot x_{\mathrm{ego}})\right),\\
+h_t &= \sigma \left(W_{\mathrm{mix}}h_{t-1}
+      +W_{\mathrm{drive}}(g_t \cdot x_{\mathrm{ego}})\right),\\
 y_t &= W_{\mathrm{out}}h_t.
 \end{aligned}
 $$
 
-The closed-form construction decomposes the computation into modules indexed by irreducible representations of \(G\). The same representation-theoretic quantities are used to analyze networks learned by gradient descent.
+The closed-form construction decomposes the computation into modules indexed by irreducible representations of $G$. The same representation-theoretic quantities are used to analyze networks learned by gradient descent.
 
 ### Navigation groups
 
@@ -77,7 +77,7 @@ The general training stack also includes cyclic, product-cyclic, dihedral, octah
 - dense and lazy irreducible representations;
 - exact closed-form QuadraticRNN construction;
 - cost-aware Fourier truncation for larger navigation groups;
-- factored recurrent mixing without a dense \(H\times H\) matrix;
+- factored recurrent mixing without a dense $H\times H$ matrix;
 - offline and online composition datasets;
 - MLP and recurrent training;
 - loss-plateau and representation-power analysis;
@@ -120,7 +120,7 @@ Notebooks are divided into trained and analytically constructed networks. See [`
 
 | Notebook | Purpose |
 | --- | --- |
-| [`sequential_cnxcn.ipynb`](notebooks/trained_networks/sequential_cnxcn.ipynb) | Train a QuadraticRNN on length-three composition in \(C_3\times C_3\) |
+| [`sequential_cnxcn.ipynb`](notebooks/trained_networks/sequential_cnxcn.ipynb) | Train a QuadraticRNN on length-three composition in $C_3\times C_3$ |
 | [`discrete_se2.ipynb`](notebooks/trained_networks/discrete_se2.ipynb) | Compare an MLP and QuadraticRNN on discrete SE(2) |
 | [`discrete_se2_rnn.ipynb`](notebooks/trained_networks/discrete_se2_rnn.ipynb) | Main end-to-end discrete-SE(2) training experiment |
 | [`discrete_se2_analysis.ipynb`](notebooks/trained_networks/discrete_se2_analysis.ipynb) | Analyze checkpoints and parameter histories without retraining |
@@ -130,11 +130,11 @@ Notebooks are divided into trained and analytically constructed networks. See [`
 
 | Notebook | Purpose |
 | --- | --- |
-| [`rnn_constructed_cnxcn.ipynb`](notebooks/constructed_networks/rnn_constructed_cnxcn.ipynb) | Exact and Fourier-truncated translation RNNs on \(C_n\times C_n\) |
+| [`rnn_constructed_cnxcn.ipynb`](notebooks/constructed_networks/rnn_constructed_cnxcn.ipynb) | Exact and Fourier-truncated translation RNNs on $C_n\times C_n$ |
 | [`rnn_constructed_discrete_se2_c6.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_se2_c6.ipynb) | C6 construction, regular actions, and naturalistic rollout |
 | [`rnn_constructed_discrete_se2_c6_tuning.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_se2_c6_tuning.ipynb) | Empirical and theoretical tuning comparisons |
 | [`rnn_constructed_discrete_se2_c6_manifolds.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_se2_c6_manifolds.ipynb) | Fixed-point module manifolds and persistent homology |
-| [`rnn_constructed_discrete_SE3.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_SE3.ipynb) | Exact and cost-aware truncated QuadraticRNNs on \(\mathbb Z_n^3\rtimes O\) |
+| [`rnn_constructed_discrete_SE3.ipynb`](notebooks/constructed_networks/rnn_constructed_discrete_SE3.ipynb) | Exact and cost-aware truncated QuadraticRNNs on $\mathbb Z_n^3\rtimes O$ |
 
 The constructed notebooks distinguish between:
 
@@ -283,7 +283,7 @@ ruff check .
 ## Current experimental landmarks
 
 - The all-irrep discrete-SE(2) and discrete-SE(3) constructions reproduce mixed group actions to floating-point precision.
-- The budgeted \(n=3\) discrete-SE(3) construction reduces hidden width from 71,040 to 3,360 while retaining approximately 48.6% of the encoding's Fourier power.
+- The budgeted $n=3$ discrete-SE(3) construction reduces hidden width from 71,040 to 3,360 while retaining approximately 48.6% of the encoding's Fourier power.
 - In the local-composition SE(2) experiment, near-perfect local fitting does not generalize to the full group law.
 
 These numbers are notebook-scale reference experiments, not benchmark claims.
