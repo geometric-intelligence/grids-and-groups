@@ -85,7 +85,7 @@ git clone git@github.com:geometric-intelligence/grids-and-groups.git
 cd grids-and-groups
 
 conda env create -f conda.yaml
-conda activate group-agf
+conda activate grids
 poetry install
 ```
 
