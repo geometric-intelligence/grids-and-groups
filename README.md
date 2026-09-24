@@ -11,8 +11,6 @@
   <a href="#overview">Overview</a> &bull;
   <a href="#installation">Install</a> &bull;
   <a href="#notebooks">Notebooks</a> &bull;
-  <a href="#usage">Usage</a> &bull;
-  <a href="#testing">Testing</a>
 </p>
 
 ---
@@ -29,10 +27,7 @@ $$
 
 The group $G$ specifies the geometry of the navigated space. Circular groups model head direction, product groups model periodic translations, and semidirect products model coupled rotations and translations in two and three dimensions.
 
-The repository supports two complementary approaches:
-
-1. **Constructed networks:** use finite-group Fourier analysis to derive QuadraticRNN weights that solve the task exactly when all irreducible representations are included.
-2. **Trained networks:** learn group composition by gradient descent and analyze the resulting loss plateaus, Fourier content, recurrent structure, and neural tuning.
+We then use finite-group Fourier analysis to derive QuadraticRNN weights that solve the task exactly when all irreducible representations are included.
 
 ## Overview
 
