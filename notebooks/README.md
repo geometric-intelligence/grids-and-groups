@@ -1,6 +1,5 @@
 # Notebooks
 
-- `trained_networks/`: learned-network experiments.
 - `constructed_networks/`: closed-form finite-group RNN experiments.
 
 For constructed notebooks, edit the paired percent-format `.py` file; the
